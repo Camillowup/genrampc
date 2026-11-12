@@ -20,8 +20,7 @@
           "widget": "slider"
         },
         {
-          "param": "BROWSE",
-          "widget": "slider"
+          "widget": "empty"
         },
         {
           "param": "MODE",
@@ -37,8 +36,7 @@
           "widget": "slider"
         },
         {
-          "param": "OPEN",
-          "widget": "slider"
+          "widget": "empty"
         },
         {
           "param": "CHOPS",

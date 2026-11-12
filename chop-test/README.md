@@ -5,7 +5,12 @@ Two small plugins that answer the technical questions behind GENRA CHOP on the M
 
 ## CHOP TEST (instrument, track 1)
 
-Pages (function keys): **TEST**, **CHORDS**, **WAVE**, **SETUP**.
+Pages (function keys): **BROWSER**, **TEST**, **CHORDS**, **WAVE**, **SETUP**.
+
+**BROWSER** (a hand-made skin page, `tools/add_browser.py`, images in `CHOP TEST/skin-extra/`): the path at the top,
+ten rows to tap (a folder `[name]` opens, a `.wav` loads; the loaded one is marked `< geladen`), **ZURÜCK** (one level
+up), **LAUFWERKE** (the drive list), **< SEITE / SEITE >** for long folders. After every change the plugin nudges the
+row texts and tells the MPC (audioMasterAutomate, audioMasterUpdateDisplay) so the screen redraws.
 
 **TEST**, one column per Q-Link column:
 

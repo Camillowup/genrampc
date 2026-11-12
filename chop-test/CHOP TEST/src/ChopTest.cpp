@@ -57,8 +57,17 @@ enum
     P_CHORD0,     // 16 read-only: chords of the current bank
     P_WAVE0 = P_CHORD0 + 16, // 16 read-only bars: level of each chop of the current bank
     P_DIAG = P_WAVE0 + 16, // read-only: how often the MPC asked about BROWSE/OPEN with another value vs. real turns
+    // the BROWSER page (a hand-written skin page: rows to tap, buttons)
+    P_ROWT0,                  // 10 read-only: the names in the rows
+    P_ROWB0 = P_ROWT0 + 10,   // 10 buttons: tapping a row (every tap flips the value; any change counts)
+    P_BACK = P_ROWB0 + 10,    // button ZURUECK
+    P_DRVBTN,                 // button LAUFWERKE
+    P_PGUP,                   // button < SEITE
+    P_PGDN,                   // button SEITE >
+    P_PAGEINFO,               // read-only: "Seite 1/3, 24 Eintraege"
     P_COUNT
 };
+static const int kRows = 10;
 
 static const int kVoices = 8;
 static const int kFadeIn = 32;
@@ -233,11 +242,31 @@ public:
             addText(id, nm);
         }
         addText("diag", "DIAGNOSE");
+        for (int i = 0; i < kRows; ++i)
+        {
+            char id[16], nm[16];
+            std::snprintf(id, sizeof id, "rowt%d", i + 1);
+            std::snprintf(nm, sizeof nm, "ZEILE %d", i + 1);
+            addText(id, nm);
+        }
+        for (int i = 0; i < kRows; ++i)
+        {
+            char id[16], nm[16];
+            std::snprintf(id, sizeof id, "rowb%d", i + 1);
+            std::snprintf(nm, sizeof nm, "TIPP %d", i + 1);
+            addParam(boolParam(id, nm, false));
+        }
+        addParam(boolParam("back", "ZURUECK", false));
+        addParam(boolParam("drvbtn", "LAUFWERKE BTN", false));
+        addParam(boolParam("pgup", "SEITE ZURUECK", false));
+        addParam(boolParam("pgdn", "SEITE VOR", false));
+        addText("pageinfo", "SEITE");
         for (int i = 0; i < P_COUNT; ++i) texts_.push_back(std::string());
         seenBrowse_ = getInt(P_BROWSE);
         seenOpen_ = getInt(P_OPEN);
         seenSave_ = getInt(P_SAVE);
         prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
+        for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_ROWB0 + i);
         for (auto& r : retired_) r.store(nullptr);
     }
 
@@ -256,7 +285,7 @@ public:
         i.name = "CHOP TEST";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 't');
-        i.version = 3000;
+        i.version = 4000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -381,6 +410,7 @@ public:
         seenOpen_ = getInt(P_OPEN);
         seenSave_ = getInt(P_SAVE);
         prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
+        for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_ROWB0 + i);
     }
 
     // ------------------------------------------------------------------ screen texts (UI thread)
@@ -406,6 +436,15 @@ public:
         }
         if (index == P_SAVE)   { out = saveRequested_ ? std::string("sichert ...") : std::string("drehen = sichern"); return true; }
         if (index == P_PATH)   { out = cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_); return true; }
+        if (index >= P_ROWT0 && index < P_ROWT0 + kRows) { out = rowTextLocked(index - P_ROWT0); return true; }
+        if (index == P_PAGEINFO)
+        {
+            char b[48];
+            int pages = std::max(1, ((int)entries_.size() + kRows - 1) / kRows);
+            std::snprintf(b, sizeof b, "Seite %d/%d, %d Eintraege", page_ + 1, pages, (int)entries_.size());
+            out = b;
+            return true;
+        }
         if (isText(index)) { out = texts_[(size_t)index]; return true; }
         return false;
     }
@@ -539,7 +578,9 @@ private:
         if (!select.empty())
             for (size_t i = 0; i < entries_.size(); ++i) if (entries_[i].path == select) { cursor_ = (int)i; break; }
         if (cursor_ == 0 && entries_.size() > 1 && entries_[0].kind == 0) cursor_ = 1; // start on the first real entry
+        page_ = cursor_ / kRows;
         textsDirty_ = true;
+        browserDirty_ = true;
     }
 
     // BROWSE is endless: only the change since the last look counts (one wheel step = one entry).
@@ -573,6 +614,45 @@ private:
         for (const std::string& d : findDrives(false)) if (p == d) return std::string();
         size_t i = p.find_last_of('/');
         return i == std::string::npos || i == 0 ? std::string() : p.substr(0, i);
+    }
+
+    // ---- the BROWSER page ----
+    std::string rowTextLocked(int row) const
+    {
+        size_t i = (size_t)(page_ * kRows + row);
+        if (i >= entries_.size()) return std::string();
+        const Entry& e = entries_[i];
+        if (e.kind == 0) return "..  (zurueck)";
+        if (e.kind == 1 || e.kind == 3) return "[" + e.label.substr(0, e.label.size() - 1) + "]";
+        std::string mark = (!loadedPath_.empty() && e.path == loadedPath_) ? "   < geladen" : "";
+        return e.label + ".wav" + mark;
+    }
+
+    void goUpLocked()
+    {
+        if (cwd_.empty()) return;
+        std::string from = cwd_;
+        cwd_ = cwd_ == "*" ? std::string() : parentOf(cwd_);
+        listLocked(from);
+        if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
+    }
+
+    void tapRowLocked(int row)
+    {
+        int i = page_ * kRows + row;
+        if (i < 0 || i >= (int)entries_.size()) return;
+        cursor_ = i;
+        const Entry e = entries_[(size_t)i];
+        ++opened_;
+        if (e.kind == 0) goUpLocked();
+        else if (e.kind == 1 || e.kind == 3)
+        {
+            cwd_ = e.path;
+            listLocked();
+            if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
+        }
+        else { requestedPath_ = e.path; pathRequest_ = true; }
+        browserDirty_ = true;
     }
 
     // OPEN is endless too: any turn opens what BROWSE shows.
@@ -815,6 +895,31 @@ private:
         if (dirty && notify) requestDisplayUpdate();
     }
 
+    // The MPC re-reads a text only when it thinks the value changed: nudge the browser's text parameters,
+    // tell the host (audioMasterAutomate) and ask for a redraw (audioMasterUpdateDisplay).
+    void refreshBrowser()
+    {
+        bool dirty;
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            dirty = browserDirty_;
+            browserDirty_ = false;
+        }
+        if (!dirty) return;
+        refreshTick_ = !refreshTick_;
+        const float v = refreshTick_ ? 1.f : 0.f;
+        int list[kRows + 3];
+        int n = 0;
+        for (int i = 0; i < kRows; ++i) list[n++] = P_ROWT0 + i;
+        list[n++] = P_PATH; list[n++] = P_PAGEINFO; list[n++] = P_LOADED;
+        for (int i = 0; i < n; ++i)
+        {
+            setNormalised(list[i], v);
+            notifyHostParameterChanged(list[i]);
+        }
+        requestDisplayUpdate();
+    }
+
     void workerMain()
     {
         using clock = std::chrono::steady_clock;
@@ -855,6 +960,26 @@ private:
                 if (o != seenOpen_ && o == prevOpen_) openLocked(o);
                 if (sv != seenSave_ && sv == prevSave_) { seenSave_ = sv; saveRequested_ = true; }
                 prevBrowse_ = b; prevOpen_ = o; prevSave_ = sv;
+                // the BROWSER page's buttons: a change that has stayed for two looks is a tap
+                for (int k = 0; k < kButtons; ++k)
+                {
+                    int v = getInt(P_ROWB0 + k);
+                    if (v != btnSeen_[k] && v == btnPrev_[k])
+                    {
+                        btnSeen_[k] = v;
+                        if (k < kRows) tapRowLocked(k);
+                        else if (k == kRows) { goUpLocked(); browserDirty_ = true; }
+                        else if (k == kRows + 1) { cwd_.clear(); listLocked(); browserDirty_ = true; }
+                        else if (k == kRows + 2) { page_ = std::max(0, page_ - 1); browserDirty_ = true; }
+                        else
+                        {
+                            int pages = std::max(1, ((int)entries_.size() + kRows - 1) / kRows);
+                            page_ = std::min(pages - 1, page_ + 1);
+                            browserDirty_ = true;
+                        }
+                    }
+                    btnPrev_[k] = v;
+                }
                 if (pathRequest_) { want = requestedPath_; pathRequest_ = false; }
                 if (lastDirDirty_) { dirToSave = lastDir_; lastDirDirty_ = false; }
             }
@@ -862,7 +987,10 @@ private:
             if (!want.empty())
             {
                 if (loadPath(want)) cutAndPublish();
+                std::lock_guard<std::mutex> g(mtx_);
+                browserDirty_ = true;
             }
+            refreshBrowser();
 
             // MODE / CHOPS: cut again once the knob rests
             int m = getInt(P_MODE), c = getInt(P_CHOPS);
@@ -938,6 +1066,10 @@ private:
     std::string cwd_, lastDir_;          // "" = the drive list, "*" = every mount
     int cursor_ = 0, seenBrowse_ = 0, seenOpen_ = 0, seenSave_ = 0;
     int prevBrowse_ = 0, prevOpen_ = 0, prevSave_ = 0, asked_ = 0, opened_ = 0;
+    static const int kButtons = kRows + 4; // rows, ZURUECK, LAUFWERKE, < SEITE, SEITE >
+    int btnSeen_[kButtons] = {}, btnPrev_[kButtons] = {};
+    int page_ = 0;
+    bool browserDirty_ = true, refreshTick_ = false;
     std::string loadedPath_, requestedPath_;
     bool pathRequest_ = false, textsDirty_ = false, lastDirDirty_ = false, saveRequested_ = false;
 };
