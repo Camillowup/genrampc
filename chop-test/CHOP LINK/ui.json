@@ -1,12 +1,31 @@
 {
   "pages": [
-    { "name": "LINK",
+    {
+      "name": "LINK",
       "controls": [
-        { "param": "VOLUME", "widget": "knob" },
-        { "param": "FOLLOW", "widget": "switch" },
-        { "param": "OCT",    "widget": "knob", "polarity": "bipolar" },
-        { "param": "STATUS", "widget": "slider" },
-        { "param": "INFO",   "widget": "slider" }
-      ] }
+        {
+          "param": "VOLUME",
+          "widget": "knob"
+        },
+        {
+          "param": "FOLLOW",
+          "widget": "slider",
+          "overlay": "menu"
+        },
+        {
+          "param": "OCT",
+          "widget": "knob",
+          "polarity": "bipolar"
+        },
+        {
+          "param": "STATUS",
+          "widget": "slider"
+        },
+        {
+          "param": "INFO",
+          "widget": "slider"
+        }
+      ]
+    }
   ]
 }

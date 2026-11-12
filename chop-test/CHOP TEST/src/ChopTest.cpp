@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // What it checks on the device:
-//   * the drives (SSD /nvme, SD card, USB under /media) can be listed and WAVs read from them
+//   * the drives (every mount in /proc/mounts under /nvme, /media, /mnt, ...) can be browsed and WAVs read
 //   * the GENRA CHOP engine (src/Chop.cpp, Core.cpp, Styles.cpp: copied from Camillowup/genra-chop) cuts and
 //     analyses a sample on the MPC's CPU (key, tempo, a chord per chop) and how long that takes
-//   * the plugin may write files (settings.txt in its own folder, a chop as WAV into the root folder)
+//   * the plugin may write files (settings.txt in its own folder, a chop as WAV next to the sample)
 //   * two plugins can share data (common/chop_link.h): CHOP LINK on another track follows the pads
 //   * live values on screen (page WAVE: one bar per chop of the current bank) with two update modes
 //
@@ -37,10 +37,10 @@ namespace {
 enum
 {
     P_VOLUME = 0, // master volume (parameter 0: the host nudges it on load, harmless)
-    P_ROOT,       // root folder (index into the list of drives and their top folders)
-    P_FOLDER,     // folder under the root (index)
-    P_SAMPLE,     // WAV file in the folder (index)
-    P_LOAD,       // toggle: every change loads the selected sample
+    P_PATH,       // read-only: the folder the browser is in
+    P_BROWSE,     // endless: every step moves the browser one entry (drives, "..", folders, WAVs)
+    P_OPEN,       // endless: every turn opens the entry under BROWSE (folder: go in, WAV: load)
+    P_LOADED,     // read-only: the loaded sample
     P_MODE,       // Transient / Equal
     P_CHOPS,      // 4..64 chops
     P_PITCH,      // all chops in semitones
@@ -51,7 +51,7 @@ enum
     P_DRIVES,
     P_WRITE,
     P_LINK,
-    P_SAVE,       // toggle: every change saves the last played chop as WAV
+    P_SAVE,       // endless: every turn saves the last played chop as WAV
     P_UPDATE,     // how the screen learns about new values: Text (polling) / Notify (host notified)
     P_PADNOTE,    // MIDI note of pad 1
     P_CHORD0,     // 16 read-only: chords of the current bank
@@ -200,10 +200,10 @@ public:
     ChopTest() : Plugin(makeInfo())
     {
         addParam(floatParam("volume", "VOLUME", -40.f, 6.f, 0.f, "dB", 1));
-        addParam(intParam("root", "ROOT", 0, 999, 0));
-        addParam(intParam("folder", "FOLDER", 0, 999, 0));
-        addParam(intParam("sample", "SAMPLE", 0, 999, 0));
-        addParam(boolParam("load", "LOAD", false));
+        addText("path", "PATH");
+        addParam(intParam("browse", "BROWSE", 0, 1000, 500));
+        addParam(intParam("open", "OPEN", 0, 1000, 500));
+        addText("loaded", "GELADEN");
         addParam(choiceParam("mode", "MODE", {"Transient", "Equal"}, 0));
         addParam(intParam("chops", "CHOPS", 4, 64, 16));
         addParam(intParam("pitch", "PITCH", -12, 12, 0, "st"));
@@ -214,7 +214,7 @@ public:
         addText("drives", "LAUFWERKE");
         addText("write", "SCHREIBEN");
         addText("link", "LINK");
-        addParam(boolParam("save", "SAVE CHOP", false));
+        addParam(intParam("save", "SAVE CHOP", 0, 1000, 500));
         addParam(choiceParam("update", "UPDATE", {"Text", "Notify"}, 0));
         addParam(choiceParam("padnote", "PAD NOTE", {"36 (C1)", "37 (C#1)", "48 (C2)", "60 (C3)"}, 0));
         for (int i = 0; i < 16; ++i)
@@ -232,6 +232,9 @@ public:
             addText(id, nm);
         }
         for (int i = 0; i < P_COUNT; ++i) texts_.push_back(std::string());
+        seenBrowse_ = getInt(P_BROWSE);
+        seenOpen_ = getInt(P_OPEN);
+        seenSave_ = getInt(P_SAVE);
         for (auto& r : retired_) r.store(nullptr);
     }
 
@@ -250,7 +253,7 @@ public:
         i.name = "CHOP TEST";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 't');
-        i.version = 1000;
+        i.version = 2000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -359,28 +362,33 @@ public:
     void saveExtraState(std::vector<uint8_t>& out) override
     {
         std::lock_guard<std::mutex> g(mtx_);
-        out.assign(loadedPath_.begin(), loadedPath_.end());
+        std::string s = "v1\n" + loadedPath_;   // never empty, so loadExtraState always runs
+        out.assign(s.begin(), s.end());
     }
 
     void loadExtraState(const uint8_t* data, size_t size) override
     {
         std::lock_guard<std::mutex> g(mtx_);
-        requestedPath_.assign(reinterpret_cast<const char*>(data), size);
-        pathRequest_ = true;
+        std::string s(reinterpret_cast<const char*>(data), size);
+        if (s.compare(0, 3, "v1\n") == 0) s = s.substr(3);
+        requestedPath_ = s;
+        pathRequest_ = !s.empty();
+        // the endless controls were set by the project: that is no turn of the user
+        seenBrowse_ = getInt(P_BROWSE);
+        seenOpen_ = getInt(P_OPEN);
+        seenSave_ = getInt(P_SAVE);
     }
 
     // ------------------------------------------------------------------ screen texts (UI thread)
     bool formatValue(int index, float plain, std::string& out) override
     {
+        (void)plain;
         std::lock_guard<std::mutex> g(mtx_);
-        int i = (int)std::lround(plain);
-        switch (index)
-        {
-            case P_ROOT:   out = roots_.empty() ? std::string("kein Laufwerk") : rootLabel(roots_[(size_t)clamp(i, 0, (int)roots_.size() - 1)]); return true;
-            case P_FOLDER: out = folders_.empty() ? std::string("-") : folderLabel(folders_[(size_t)clamp(i, 0, (int)folders_.size() - 1)]); return true;
-            case P_SAMPLE: out = samples_.empty() ? std::string("keine WAVs") : stripWav(samples_[(size_t)clamp(i, 0, (int)samples_.size() - 1)]); return true;
-            default: break;
-        }
+        // the endless controls act here too, so the text the MPC reads right after a turn is already the new one
+        if (index == P_BROWSE) { stepBrowserLocked(); out = browseTextLocked(); return true; }
+        if (index == P_OPEN)   { openIfTurnedLocked(); out = cwd_.empty() ? std::string("> Laufwerke") : "> " + pathLabel(cwd_); return true; }
+        if (index == P_SAVE)   { out = saveRequested_ ? std::string("sichert ...") : std::string("drehen = sichern"); return true; }
+        if (index == P_PATH)   { out = cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_); return true; }
         if (isText(index)) { out = texts_[(size_t)index]; return true; }
         return false;
     }
@@ -398,16 +406,17 @@ private:
         return std::find(textParams_.begin(), textParams_.end(), index) != textParams_.end();
     }
 
-    static std::string rootLabel(const std::string& p)
+    // "/nvme/Samples" -> "SSD/Samples", "/media/Archive/x" -> "Archive/x"
+    static std::string pathLabel(const std::string& p)
     {
-        std::string s = p;
-        if (s.compare(0, 5, "/nvme") == 0) s = "SSD" + s.substr(5);
-        else if (s.compare(0, 7, "/media/") == 0) s = s.substr(7);
-        return s.empty() ? p : s;
-    }
-    std::string folderLabel(const std::string& rel) const
-    {
-        return rel.empty() ? std::string("(Hauptordner)") : rel;
+        if (p == "*") return "(alle Mounts)";
+        if (p.compare(0, 5, "/nvme") == 0) return "SSD" + p.substr(5);
+        for (const char* pre : {"/media/", "/mnt/", "/run/media/"})
+        {
+            size_t n = std::strlen(pre);
+            if (p.compare(0, n, pre) == 0) return p.substr(n);
+        }
+        return p;
     }
 
     void startVoice(int pad, float vel, float pitch)
@@ -455,75 +464,108 @@ private:
         if (texts_[(size_t)index] != s) { texts_[(size_t)index] = s; textsDirty_ = true; }
     }
 
-    void scanDrives()
-    {
-        std::vector<std::string> drives;
-        if (const char* env = std::getenv("CHOP_TEST_DRIVE")) if (isDir(env)) drives.push_back(env); // for tests on a computer
-        if (isDir("/nvme")) drives.push_back("/nvme");
-        for (const std::string& m : listDir("/media", true)) drives.push_back("/media/" + m);
-        std::vector<std::string> roots;
-        std::string names;
-        for (const std::string& d : drives)
-        {
-            roots.push_back(d);
-            for (const std::string& sub : listDir(d, true)) roots.push_back(d + "/" + sub);
-            if (!names.empty()) names += ", ";
-            names += rootLabel(d);
-        }
-        {
-            std::lock_guard<std::mutex> g(mtx_);
-            if (roots != roots_) { roots_ = roots; textsDirty_ = true; listsChanged_ = true; }
-        }
-        setText(P_DRIVES, drives.empty() ? std::string("keins gefunden") : names);
-    }
+    // ---- the browser (its state is shared with the UI thread: mtx_ held by the callers of *Locked) ----
+    struct Entry { std::string label, path; int kind; }; // kind: 0 up, 1 folder, 2 wav, 3 drive
 
-    std::string currentRoot()
-    {
-        std::lock_guard<std::mutex> g(mtx_);
-        if (roots_.empty()) return std::string();
-        return roots_[(size_t)clamp(getInt(P_ROOT), 0, (int)roots_.size() - 1)];
-    }
-
-    void scanFolders(const std::string& root)
+    // Every mount point that can hold samples: /nvme, /media/*, /mnt/*, /run/media/*/* (from /proc/mounts).
+    static std::vector<std::string> findDrives(bool all)
     {
         std::vector<std::string> out;
-        out.push_back(std::string()); // the root itself
-        // breadth first, 3 levels, at most 400 folders
-        std::vector<std::string> level{std::string()};
-        for (int depth = 0; depth < 3 && out.size() < 400; ++depth)
+        if (const char* env = std::getenv("CHOP_TEST_DRIVE")) if (isDir(env)) out.push_back(env); // tests on a computer
+        std::string t;
+        if (mpc::readTextFile("/proc/mounts", t))
         {
-            std::vector<std::string> next;
-            for (const std::string& rel : level)
-                for (const std::string& sub : listDir(rel.empty() ? root : root + "/" + rel, true))
+            size_t pos = 0;
+            while (pos < t.size())
+            {
+                size_t e = t.find('\n', pos);
+                std::string line = t.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+                pos = e == std::string::npos ? t.size() : e + 1;
+                size_t a = line.find(' ');
+                if (a == std::string::npos) continue;
+                size_t b = line.find(' ', a + 1);
+                std::string mnt = line.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+                // /proc/mounts writes a space as \040
+                std::string m;
+                for (size_t i = 0; i < mnt.size(); ++i)
                 {
-                    std::string r = rel.empty() ? sub : rel + "/" + sub;
-                    next.push_back(r);
-                    out.push_back(r);
-                    if (out.size() >= 400) break;
+                    if (mnt[i] == '\\' && i + 3 < mnt.size()) { m += (char)std::strtol(mnt.substr(i + 1, 3).c_str(), nullptr, 8); i += 3; }
+                    else m += mnt[i];
                 }
-            level.swap(next);
+                bool keep = all ? (m != "/" && m.compare(0, 5, "/proc") != 0 && m.compare(0, 4, "/sys") != 0 && m.compare(0, 4, "/dev") != 0)
+                                : (m == "/nvme" || (m.size() > 7 && m.compare(0, 7, "/media/") == 0) || (m.size() > 5 && m.compare(0, 5, "/mnt/") == 0)
+                                   || (m.size() > 11 && m.compare(0, 11, "/run/media/") == 0));
+                if (keep && isDir(m) && std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m);
+            }
         }
-        std::sort(out.begin() + 1, out.end(), lessNoCase);
-        std::lock_guard<std::mutex> g(mtx_);
-        folders_ = out;
+        if (!all && isDir("/nvme") && std::find(out.begin(), out.end(), std::string("/nvme")) == out.end()) out.insert(out.begin(), "/nvme");
+        return out;
+    }
+
+    // Fills entries_ for cwd_ ("" = the drives, "*" = every mount). Keeps the cursor on `select` if given.
+    void listLocked(const std::string& select = std::string())
+    {
+        entries_.clear();
+        if (cwd_.empty() || cwd_ == "*")
+        {
+            for (const std::string& d : findDrives(cwd_ == "*")) entries_.push_back({pathLabel(d) + "/", d, 3});
+            if (cwd_.empty()) entries_.push_back({"(alle Mounts)/", "*", 1});
+            else entries_.insert(entries_.begin(), {"..", "", 0});
+        }
+        else
+        {
+            entries_.push_back({"..", "", 0});
+            for (const std::string& n : listDir(cwd_, true)) entries_.push_back({n + "/", cwd_ + "/" + n, 1});
+            for (const std::string& n : listDir(cwd_, false)) entries_.push_back({stripWav(n), cwd_ + "/" + n, 2});
+        }
+        cursor_ = 0;
+        if (!select.empty())
+            for (size_t i = 0; i < entries_.size(); ++i) if (entries_[i].path == select) { cursor_ = (int)i; break; }
+        if (cursor_ == 0 && entries_.size() > 1 && entries_[0].kind == 0) cursor_ = 1; // start on the first real entry
         textsDirty_ = true;
     }
 
-    std::string currentFolderPath(const std::string& root)
+    // BROWSE is endless: only the change since the last look counts (one wheel step = one entry).
+    void stepBrowserLocked()
     {
-        std::lock_guard<std::mutex> g(mtx_);
-        if (folders_.empty()) return root;
-        const std::string& rel = folders_[(size_t)clamp(getInt(P_FOLDER), 0, (int)folders_.size() - 1)];
-        return rel.empty() ? root : root + "/" + rel;
+        int v = getInt(P_BROWSE);
+        int d = v - seenBrowse_;
+        seenBrowse_ = v;
+        if (d == 0 || entries_.empty()) return;
+        int step = d > 0 ? 1 + (d - 1) / 6 : -1 - (-d - 1) / 6; // fast turns move faster, a wheel click moves one
+        cursor_ = clamp(cursor_ + step, 0, (int)entries_.size() - 1);
+        textsDirty_ = true;
     }
 
-    void scanSamples(const std::string& folder)
+    std::string browseTextLocked() const
     {
-        std::vector<std::string> s = listDir(folder, false);
-        std::lock_guard<std::mutex> g(mtx_);
-        samples_ = s;
-        sampleFolder_ = folder;
-        textsDirty_ = true;
+        if (entries_.empty()) return "(leer)";
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "  %d/%d", cursor_ + 1, (int)entries_.size());
+        std::string label = entries_[(size_t)cursor_].label;
+        if (label.size() > 22) label = label.substr(0, 21) + "~";
+        return label + buf;
+    }
+
+    std::string parentOf(const std::string& p) const
+    {
+        for (const std::string& d : findDrives(false)) if (p == d) return std::string();
+        size_t i = p.find_last_of('/');
+        return i == std::string::npos || i == 0 ? std::string() : p.substr(0, i);
+    }
+
+    // OPEN is endless too: any turn opens what BROWSE shows.
+    void openIfTurnedLocked()
+    {
+        int v = getInt(P_OPEN);
+        if (v == seenOpen_) return;
+        seenOpen_ = v;
+        if (entries_.empty()) return;
+        const Entry e = entries_[(size_t)cursor_];
+        if (e.kind == 0) { std::string from = cwd_; cwd_ = cwd_ == "*" ? std::string() : parentOf(cwd_); listLocked(from); }
+        else if (e.kind == 1 || e.kind == 3) { cwd_ = e.path; listLocked(); }
+        else { requestedPath_ = e.path; pathRequest_ = true; }
+        if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
     }
 
     // LOAD's switch shows On/Off (the MPC needs a real on/off there); what loading does is shown in ANALYSE
@@ -627,30 +669,35 @@ private:
         return f.empty() ? std::string() : f + "/settings.txt";
     }
 
-    void saveSettings(const std::string& root)
+    // settings.txt remembers the last folder of the browser, for every project
+    void saveSettings(const std::string& dir)
     {
         std::string p = settingsPath();
-        if (p.empty() || root.empty()) return;
-        std::string s = "root=" + root + "\n";
-        setText(P_WRITE, writeFileBytes(p, s.data(), s.size()) ? "OK, ROOT gespeichert" : "Fehler: settings.txt");
+        if (p.empty()) return;
+        std::string s = "lastdir=" + dir + "\n";
+        setText(P_WRITE, writeFileBytes(p, s.data(), s.size()) ? "OK, Ordner gemerkt" : "Fehler: settings.txt");
     }
 
-    std::string loadSettingsRoot() const
+    std::string loadSettingsDir() const
     {
         std::string t;
         if (!mpc::readTextFile(settingsPath(), t)) return std::string();
-        size_t i = t.find("root=");
+        size_t i = t.find("lastdir=");
         if (i == std::string::npos) return std::string();
         size_t e = t.find('\n', i);
-        return t.substr(i + 5, e == std::string::npos ? std::string::npos : e - i - 5);
+        return t.substr(i + 8, e == std::string::npos ? std::string::npos : e - i - 8);
     }
 
     void saveChop()
     {
         int pad = lastPad_.load();
         if (pad < 0 || pad >= info_.count || src_.frames() == 0) { setSaveText("erst ein Pad spielen"); return; }
-        std::string root = currentRoot();
-        std::string dir = root.empty() ? mpc::pluginFolder() : root;
+        std::string dir;
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            size_t i = loadedPath_.find_last_of('/');
+            dir = i == std::string::npos ? mpc::pluginFolder() : loadedPath_.substr(0, i);
+        }
         dir += "/CHOP TEST";
         ::mkdir(dir.c_str(), 0777);
         if (chopEnd_[pad] <= chopStart_[pad]) { setSaveText("Fehler: Pad leer"); return; }
@@ -717,9 +764,19 @@ private:
             setText(P_CHORD0 + k, buf);
 
             bool on = (playing >> p) & 1u;
-            std::snprintf(buf, sizeof buf, "%s%d%s", on ? "> " : "", p + 1, p < info_.count ? "" : " leer");
-            setText(P_WAVE0 + k, buf);
             float v = p < info_.count ? chopPeak_[p] : 0.f;
+            if (p < info_.count)
+            {
+                // the level as text too: 10 characters, # = level, playing chops get "> "
+                char bar[12];
+                int n = clamp((int)std::lround(v * 10.f), 0, 10);
+                for (int j = 0; j < 10; ++j) bar[j] = j < n ? '#' : '-';
+                bar[10] = 0;
+                std::snprintf(buf, sizeof buf, "%s%d %s", on ? "> " : "", p + 1, bar);
+            }
+            else
+                std::snprintf(buf, sizeof buf, "%d leer", p + 1);
+            setText(P_WAVE0 + k, buf);
             if (std::fabs(getNormalised(P_WAVE0 + k) - v) > 1e-4f)
             {
                 setNormalised(P_WAVE0 + k, v);
@@ -742,85 +799,46 @@ private:
         using clock = std::chrono::steady_clock;
         setText(P_LINK, linkOk_ ? "bereit (" + link_.path() + ")" : "Fehler: " + link_.error());
         writeTest();
-        scanDrives();
-
-        // the root from settings.txt (set once, for every project)
-        std::string savedRoot = loadSettingsRoot();
-        if (!savedRoot.empty())
         {
             std::lock_guard<std::mutex> g(mtx_);
-            for (size_t i = 0; i < roots_.size(); ++i)
-                if (roots_[i] == savedRoot) { set(P_ROOT, (float)i); break; }
+            std::string last = loadSettingsDir();
+            cwd_ = (!last.empty() && isDir(last)) ? last : std::string();
+            listLocked();
         }
-
-        int lastRoot = -1, lastFolder = -1;
-        float lastLoad = getNormalised(P_LOAD), lastSave = getNormalised(P_SAVE);
+        clock::time_point cutChanged{}, lastDrives{};
         int lastMode = getInt(P_MODE), lastChops = getInt(P_CHOPS);
-        clock::time_point cutChanged{}, rootChanged{}, lastDrives = clock::now();
-        bool cutPending = false, rootDirty = false;
-        bool haveSample = true; // the built-in loop from prepare()
+        bool cutPending = false;
 
         while (!quit_.load())
         {
             auto now = clock::now();
 
-            // a project brought its sample along
-            std::string want;
+            // drives (shown in LAUFWERKE; the drive list of the browser follows when it is shown)
+            if (now - lastDrives > std::chrono::seconds(3))
+            {
+                lastDrives = now;
+                std::string names;
+                for (const std::string& d : findDrives(false)) names += (names.empty() ? "" : ", ") + pathLabel(d);
+                setText(P_DRIVES, names.empty() ? std::string("keins gefunden") : names);
+                std::lock_guard<std::mutex> g(mtx_);
+                if (cwd_.empty()) { std::string sel = entries_.empty() ? std::string() : entries_[(size_t)cursor_].path; listLocked(sel); }
+            }
+
+            // the endless controls (also handled in formatValue, whichever comes first)
+            std::string want, dirToSave;
             {
                 std::lock_guard<std::mutex> g(mtx_);
+                stepBrowserLocked();
+                openIfTurnedLocked();
                 if (pathRequest_) { want = requestedPath_; pathRequest_ = false; }
+                if (lastDirDirty_) { dirToSave = lastDir_; lastDirDirty_ = false; }
+                int sv = getInt(P_SAVE);
+                if (sv != seenSave_) { seenSave_ = sv; saveRequested_ = true; }
             }
-            if (!want.empty() && loadPath(want)) { cutAndPublish(); haveSample = true; }
-
-            // nothing loaded yet: the built-in loop, so the pads always sound
-            if (!haveSample)
+            if (!dirToSave.empty()) saveSettings(dirToSave);
+            if (!want.empty())
             {
-                src_ = makeBuiltinLoop();
-                cutAndPublish();
-                haveSample = true;
-                {
-                    std::lock_guard<std::mutex> g(mtx_);
-                    loadedPath_.clear();
-                }
-            }
-
-            // drives come and go (USB stick, SD card)
-            if (now - lastDrives > std::chrono::seconds(5)) { scanDrives(); lastDrives = now; }
-
-            // ROOT / FOLDER -> lists
-            bool lists;
-            {
-                std::lock_guard<std::mutex> g(mtx_);
-                lists = listsChanged_;
-                listsChanged_ = false;
-            }
-            int r = getInt(P_ROOT), f = getInt(P_FOLDER);
-            if (r != lastRoot || lists)
-            {
-                if (lastRoot >= 0 && r != lastRoot) { rootDirty = true; rootChanged = now; }
-                lastRoot = r;
-                scanFolders(currentRoot());
-                lastFolder = -1;
-            }
-            if (f != lastFolder)
-            {
-                lastFolder = f;
-                scanSamples(currentFolderPath(currentRoot()));
-            }
-            if (rootDirty && now - rootChanged > std::chrono::milliseconds(1000)) { saveSettings(currentRoot()); rootDirty = false; }
-
-            // LOAD (every change of the toggle)
-            float ld = getNormalised(P_LOAD);
-            if (ld != lastLoad)
-            {
-                lastLoad = ld;
-                std::string path;
-                {
-                    std::lock_guard<std::mutex> g(mtx_);
-                    if (!samples_.empty()) path = sampleFolder_ + "/" + samples_[(size_t)clamp(getInt(P_SAMPLE), 0, (int)samples_.size() - 1)];
-                }
-                if (path.empty()) setLoadText("kein Sample gewaehlt");
-                else if (loadPath(path)) cutAndPublish();
+                if (loadPath(want)) cutAndPublish();
             }
 
             // MODE / CHOPS: cut again once the knob rests
@@ -829,9 +847,20 @@ private:
             if (cutPending && now - cutChanged > std::chrono::milliseconds(300)) { cutPending = false; cutAndPublish(); }
 
             // SAVE CHOP
-            float sv = getNormalised(P_SAVE);
-            if (sv != lastSave) { lastSave = sv; saveChop(); }
+            bool save;
+            {
+                std::lock_guard<std::mutex> g(mtx_);
+                save = saveRequested_;
+            }
+            if (save)
+            {
+                saveChop();
+                std::lock_guard<std::mutex> g(mtx_);
+                saveRequested_ = false;
+                textsDirty_ = true;
+            }
 
+            setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
             updateScreen();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
         }
@@ -872,9 +901,11 @@ private:
     std::mutex mtx_;
     std::vector<int> textParams_;
     std::vector<std::string> texts_;
-    std::vector<std::string> roots_, folders_, samples_;
-    std::string sampleFolder_, loadedPath_, requestedPath_;
-    bool pathRequest_ = false, textsDirty_ = false, listsChanged_ = false;
+    std::vector<Entry> entries_;
+    std::string cwd_, lastDir_;          // "" = the drive list, "*" = every mount
+    int cursor_ = 0, seenBrowse_ = 0, seenOpen_ = 0, seenSave_ = 0;
+    std::string loadedPath_, requestedPath_;
+    bool pathRequest_ = false, textsDirty_ = false, lastDirDirty_ = false, saveRequested_ = false;
 };
 
 MPC_PLUGIN_ENTRY(ChopTest)

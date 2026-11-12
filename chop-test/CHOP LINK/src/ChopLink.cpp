@@ -55,7 +55,7 @@ public:
         i.name = "CHOP LINK";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'l');
-        i.version = 1000;
+        i.version = 2000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
