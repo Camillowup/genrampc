@@ -10,6 +10,7 @@ The first goal is **GENRA CHOP** on the MPC: the sample chopper from the VCV Rac
 | Folder | What |
 |---|---|
 | `chop-test/` | **Mini test**: `CHOP TEST` (load a WAV from the SSD, chop it with the GENRA CHOP engine, play the chops on the pads) and `CHOP LINK` (a second plugin on another track that follows CHOP TEST). See [chop-test/README.md](chop-test/README.md). |
+| `genra-chop/` | **GENRA CHOP 0.1** (the chopper with loops in 29 styles on the MPC's transport, pages BROWSER, CHOP, SETUP) and its first companion **GENRA BASS**. See [genra-chop/README.md](genra-chop/README.md). Artifact **genra-mpc-genra-chop**. |
 | `sdk/` | A copy of Akai's MPC Plugin SDK (MIT). One change: `tools/build.py` links `-lpthread` (our plugins run a worker thread). |
 
 ## Install on the MPC

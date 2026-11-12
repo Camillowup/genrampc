@@ -1,0 +1,17 @@
+{
+  "name": "GENRA CHOP",
+  "manufacturer": "Genra",
+  "version": "0.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnCh",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Sampler",
+  "file32": "VST/genra-chop-arm32.so",
+  "file64": "VST/genra-chop-arm64.so",
+  "description": "GENRA CHOP for the MPC: load a sample, chop it, roll hip-hop loops in 29 styles (80s to 2020s) on the MPC's transport, and lead the companion plugins (GENRA BASS) on other tracks.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}

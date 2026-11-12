@@ -1,0 +1,14 @@
+{
+  "style": {
+    "background": "ffd9d3c3",
+    "text": "ff2a2926",
+    "muted": "ff5a5850",
+    "accent": "ffc0322b"
+  },
+  "pages": [
+    { "name": "KNOBS",
+      "controls": [
+        { "param": "LISTE", "widget": "slider" }
+      ] }
+  ]
+}
