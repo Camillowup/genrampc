@@ -54,9 +54,13 @@ class Page:
                               G.button_data(png, off_png or png, button_id, group), b, "No", "Show", "Always",
                               remap=[("Data", self.h[param])]))
 
-    def big_button(self, param, bg, clear, caption, b, height=34.0):
+    def caption(self, key, b, height, colour=WHITE, just=LEFT):
+        """Fixed texts in the skin are not drawn on the MPC; the plugin serves each caption as "CAP <key>"."""
+        self.value("CAP " + key, b, height, colour, just)
+
+    def big_button(self, param, bg, clear, key, b, height=34.0):
         self.image(bg, b)
-        self.text(caption, b, height, WHITE, CENTRED)
+        self.caption(key, b, height, WHITE, CENTRED)
         self.button(param, clear, b)
 
     def control(self, param, b):
@@ -64,10 +68,10 @@ class Page:
         self.c.append(G.entry(param, self.defs[param], G.obj(("version", 1), ("handleName", "Data")), b,
                               "Yes", "Hide", "Always", remap=[("Data", self.h[param])]))
 
-    def tab(self, name, index):
+    def tab(self, name, index, qlink_bounds):
         comp = G.component_definition([], self.c, self.style["background"])
         return G.obj(("version", 1), ("tabName", name), ("fnKeyIndex", index), ("fnKeySubIndex", 0),
-                     ("componentDefinition", comp), ("qlinkBoundsData", list(G.QLINK_BOUNDS)))
+                     ("componentDefinition", comp), ("qlinkBoundsData", list(qlink_bounds)))
 
 
 def browser(p):
@@ -79,13 +83,14 @@ def browser(p):
         p.image("br_row.png", "20 %d 880 48" % y)
         p.value("ZEILE %d" % (k + 1), "38 %d 850 48" % y, 28.0)
         p.button("TIPP %d" % (k + 1), "br_clear_row.png", "20 %d 880 48" % y)
-    p.big_button("ZURUECK", "br_red.png", "br_clear_big.png", "ZURÜCK", "920 66 340 110")
-    p.big_button("LAUFWERKE", "br_purple.png", "br_clear_big.png", "LAUFWERKE", "920 186 340 110")
-    p.big_button("SEITE ZURUECK", "br_grey.png", "br_clear_small.png", "< SEITE", "920 306 165 110")
-    p.big_button("SEITE VOR", "br_grey.png", "br_clear_small.png", "SEITE >", "1095 306 165 110")
-    p.value("LISTINFO", "920 424 340 40", 26.0, muted, CENTRED)
-    p.control("LISTE", "951 466 278 107")
-    p.text("Geladen:", "20 584 150 40", 26.0, muted)
+    p.big_button("ZURUECK", "br_red.png", "clear_big90.png", "back", "920 66 340 90")
+    p.big_button("LAUFWERKE", "br_purple.png", "clear_big90.png", "drives", "920 164 340 90")
+    p.big_button("SEITE ZURUECK", "br_grey.png", "clear_small90.png", "pgup", "920 262 165 90")
+    p.big_button("SEITE VOR", "br_grey.png", "clear_small90.png", "pgdn", "1095 262 165 90")
+    p.big_button("SPEICHERORT HIER", "br_save.png", "clear_savehere.png", "savehere", "920 360 340 70", 28.0)
+    p.value("LISTINFO", "920 434 340 36", 24.0, muted, CENTRED)
+    p.control("LISTE", "951 472 278 107")
+    p.caption("loaded", "20 584 150 40", 26.0, muted)
     p.value("GELADEN", "170 584 1090 40", 28.0, p.style["accent"])
 
 
@@ -111,24 +116,27 @@ def pads(p):
     for i, name in enumerate("ABCD"):
         b = "%d 310 140 90" % (650 + i * 152)
         p.button("BANK", "bank_on.png", b, button_id=i, group=4, off_png="bank_off.png")
-        p.text(name, b, 40.0, WHITE, CENTRED)
-    p.big_button("CHOP SPEICHERN", "br_save.png", "clear_save.png", "CHOP SPEICHERN", "650 420 600 100")
+        p.caption("bank" + name, b, 40.0, WHITE, CENTRED)
+    p.big_button("CHOP SPEICHERN", "br_save.png", "clear_half.png", "save", "650 420 295 100", 30.0)
+    # CHOKE: its caption comes from the plugin and says the state ("CHOKE AN" / "CHOKE AUS")
+    p.image("br_purple.png", "955 420 295 100")
+    p.value("CHOKETEXT", "955 420 295 100", 30.0, WHITE, CENTRED)
+    p.button("CHOKE", "clear_half.png", "955 420 295 100")
     p.value("ZULETZT", "20 560 1240 44", 26.0)
 
 
 def setup(p):
     muted = p.style["muted"]
-    p.big_button("LERNEN", "br_learn.png", "clear_learn.png", "LERNEN", "20 20 400 140", 44.0)
+    p.big_button("LERNEN", "br_learn.png", "clear_learn.png", "learn", "20 20 400 140", 44.0)
     p.value("LERNINFO", "20 175 400 50", 28.0)
-    p.text("LERNEN antippen, dann die", "20 240 400 36", 24.0, muted)
-    p.text("Pads 1 bis 16 der Reihe nach", "20 276 400 36", 24.0, muted)
-    p.text("druecken (Pad 1 = unten links).", "20 312 400 36", 24.0, muted)
-    for i, (label, param) in enumerate((("Pad-Belegung", "BELEGUNG"), ("Laufwerke", "LAUFWERKSLISTE"),
-                                        ("Schreiben", "SCHREIBEN"), ("CHOP LINK", "CHOP LINK"),
-                                        ("Analyse", "ANALYSE"))):
+    p.caption("help1", "20 240 400 36", 24.0, muted)
+    p.caption("help2", "20 276 400 36", 24.0, muted)
+    p.caption("help3", "20 312 400 36", 24.0, muted)
+    for i, (key, param) in enumerate((("r1", "BELEGUNG"), ("r2", "LAUFWERKSLISTE"), ("r3", "SCHREIBEN"),
+                                      ("r4", "CHOP LINK"), ("r5", "ANALYSE"), ("r6", "SPEICHERORT"))):
         y = 20 + i * 70
         p.image("br_row.png", "450 %d 810 60" % y)
-        p.text(label, "470 %d 220 60" % y, 26.0, muted)
+        p.caption(key, "470 %d 220 60" % y, 26.0, muted)
         p.value(param, "690 %d 560 60" % y, 26.0)
 
 
@@ -156,10 +164,12 @@ def main():
     page_data = dict(tui)["pageData"]
     tabs = dict(page_data)["tabs"]
     del tabs[:]
-    for i, (name, fn) in enumerate((("BROWSER", browser), ("PADS", pads), ("SETUP", setup))):
+    # the Q-Link highlight: around LISTE (browser), around the four knobs (pads), none (setup)
+    pages = (("BROWSER", browser, ["941 464 298 123"]), ("PADS", pads, ["640 56 608 244"]), ("SETUP", setup, []))
+    for i, (name, fn, ql) in enumerate(pages):
         pg = Page(h, style, defs)
         fn(pg)
-        tabs.append(pg.tab(name, i))
+        tabs.append(pg.tab(name, i, ql))
     # BANK steps through A-D on the data wheel too
     for k, v in page_data:
         if k == "replacementStrings":

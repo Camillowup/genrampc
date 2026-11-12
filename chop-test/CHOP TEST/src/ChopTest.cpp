@@ -73,8 +73,26 @@ enum
     P_KEYTXT,                     // info bar, split (texts are cut after 31 characters): "Tonart F#m"
     P_TEMPOTXT,                   // "Sample 92 / MPC 92 BPM"
     P_CHOPTXT,                    // "16 Chops, Bank A"
-    P_COUNT
+    P_SAVEDIRTXT,                 // where CHOP SPEICHERN writes
+    P_SAVEHERE,                   // button SPEICHERORT HIER (browser): the current folder becomes the save folder
+    P_CHOKE,                      // button CHOKE (pads): on = all chops in one mute group, a new chop cuts the last
+    P_CHOKETXT,                   // its caption: "CHOKE AN" / "CHOKE AUS"
+    P_CAP0,                       // the captions of buttons and headings: fixed texts in the skin are not drawn on
+                                  // the MPC, texts from the plugin are; so every caption is a read-only parameter
+    P_COUNT = P_CAP0 + 21
 };
+
+// key (the parameter is named "CAP <key>", build_skin.py finds it by that name) and text
+static const char* const kCaptions[][2] = {
+    {"back", "ZURÜCK"}, {"drives", "LAUFWERKE"}, {"pgup", "< SEITE"}, {"pgdn", "SEITE >"},
+    {"savehere", "SPEICHERORT HIER"}, {"loaded", "Geladen:"},
+    {"bankA", "A"}, {"bankB", "B"}, {"bankC", "C"}, {"bankD", "D"},
+    {"save", "CHOP SPEICHERN"}, {"learn", "LERNEN"},
+    {"help1", "LERNEN antippen, dann die"}, {"help2", "Pads 1 bis 16 der Reihe nach"},
+    {"help3", "druecken (Pad 1 = unten links)"},
+    {"r1", "Pad-Belegung"}, {"r2", "Laufwerke"}, {"r3", "Schreiben"}, {"r4", "CHOP LINK"}, {"r5", "Analyse"},
+    {"r6", "Speicherort"}};
+static_assert(sizeof(kCaptions) / sizeof(kCaptions[0]) == 21, "P_COUNT counts the captions");
 
 static const int kVoices = 8;
 static const int kFadeIn = 32;
@@ -301,7 +319,13 @@ public:
         addText("keytxt", "TONART");
         addText("tempotxt", "TEMPO");
         addText("choptxt", "CHOPINFO");
+        addText("savedirtxt", "SPEICHERORT");
+        addButton("savehere", "SPEICHERORT HIER");
+        addParam(boolParam("choke", "CHOKE", true));
+        addText("choketxt", "CHOKETEXT");
+        for (const auto& c : kCaptions) addText((std::string("cap") + c[0]).c_str(), (std::string("CAP ") + c[0]).c_str());
         texts_.assign(P_COUNT, std::string());
+        for (int i = 0; i < 21; ++i) texts_[(size_t)(P_CAP0 + i)] = kCaptions[i][1];
         shown_.assign(P_COUNT, std::string("\x01"));
         for (auto& r : retired_) r.store(nullptr);
         for (auto& n : noteToPad_) n.store(-1);
@@ -323,7 +347,7 @@ public:
         i.name = "CHOP TEST";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 't');
-        i.version = 5000;
+        i.version = 6000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -339,6 +363,8 @@ public:
             started_ = true;
             linkOk_ = link_.open();
             loadPadMap();
+            set(P_BANK, 0.f);           // always start on bank A
+            bankReset_.store(true);
             src_ = makeBuiltinLoop();   // the pads sound from the first block on
             cutAndPublish();
             worker_ = std::thread([this] { workerMain(); });
@@ -450,6 +476,8 @@ public:
         if (s.compare(0, 3, "v1\n") == 0) s = s.substr(3);
         requestedPath_ = s;
         pathRequest_ = !s.empty();
+        set(P_BANK, 0.f);  // a project starts on bank A too
+        bankReset_.store(true);
         resyncButtons(); // the buttons were set by the project: that is no tap
     }
 
@@ -477,6 +505,7 @@ private:
     void resyncButtons()
     {
         for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_SAVE + i);
+        saveHereSeen_ = saveHerePrev_ = getInt(P_SAVEHERE);
     }
 
     // ------------------------------------------------------------------ audio helpers
@@ -519,7 +548,10 @@ private:
         if (!cur_ || chop >= cur_->info.count) { lastChop_.store(-1 - 1000 - chop, std::memory_order_relaxed); return; }
         lastChop_.store(chop, std::memory_order_relaxed);
         lastPlayed_.store(chop, std::memory_order_relaxed);
-        for (Voice& v : voices_) if (v.active && v.chop == chop && v.release < 0) v.release = kFadeOut / 2;
+        // CHOKE on: one mute group (every chop cuts the others); off: only the same chop cuts itself
+        const bool choke = getBool(P_CHOKE);
+        for (Voice& v : voices_)
+            if (v.active && v.release < 0 && (choke || v.chop == chop)) v.release = kFadeOut / 2;
         Voice* slot = nullptr;
         for (Voice& v : voices_) if (!v.active) { slot = &v; break; }
         if (!slot)
@@ -572,6 +604,7 @@ private:
         bool any = false;
         for (int i = P_PATH; i < P_COUNT; ++i)
         {
+            if (i == P_SAVEHERE || i == P_CHOKE) continue; // buttons, not texts
             std::string now;
             {
                 std::lock_guard<std::mutex> g(mtx_);
@@ -760,7 +793,7 @@ private:
     {
         std::string p = settingsPath();
         if (p.empty()) return;
-        std::string s = "lastdir=" + lastDir_ + "\npadmap=" + padMapString() + "\n";
+        std::string s = "lastdir=" + lastDir_ + "\npadmap=" + padMapString() + "\nsavedir=" + saveDir_ + "\n";
         if (!writeFileBytes(p, s.data(), s.size())) setText(P_WRITE, "Fehler: settings.txt");
     }
 
@@ -802,6 +835,7 @@ private:
             dir = i == std::string::npos ? mpc::pluginFolder() : loadedPath_.substr(0, i);
         }
         dir += "/CHOP TEST";
+        if (!saveDir_.empty() && isDir(saveDir_)) dir = saveDir_;  // SPEICHERORT HIER
         ::mkdir(dir.c_str(), 0777);
         if (chopEnd_[chop] <= chopStart_[chop]) { setText(P_WRITE, "Fehler: Chop leer"); return; }
         std::vector<uint8_t> wav = hh::writeWav(src_, chopStart_[chop], chopEnd_[chop], false, getInt(P_PITCH));
@@ -832,6 +866,7 @@ private:
         setText(P_TEMPOTXT, buf);
         std::snprintf(buf, sizeof buf, "%d Chops, Bank %c", info_.count, "ABCD"[bank]);
         setText(P_CHOPTXT, buf);
+        setText(P_CHOKETXT, getBool(P_CHOKE) ? "CHOKE AN" : "CHOKE AUS");
         setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
 
         int note = lastNote_.load(), pad = lastPad_.load(), chop = lastChop_.load();
@@ -865,6 +900,7 @@ private:
         else
             setText(P_MAPINFO, "Standard, Pad 1 = Note 36");
 
+        setText(P_SAVEDIRTXT, saveDir_.empty() ? std::string("neben dem Sample (/CHOP TEST)") : pathLabel(saveDir_), true);
         std::string names;
         for (const std::string& d : findDrives(false)) names += (names.empty() ? "" : ", ") + pathLabel(d);
         setText(P_DRIVES, names.empty() ? std::string("keins gefunden") : names);
@@ -925,6 +961,20 @@ private:
             }
             btnPrev_[i] = v;
         }
+        int sh = getInt(P_SAVEHERE);
+        if (sh != saveHereSeen_ && sh == saveHerePrev_)
+        {
+            saveHereSeen_ = sh;
+            if (cwd_.empty() || cwd_ == "*") setText(P_WRITE, "erst einen Ordner oeffnen");
+            else
+            {
+                saveDir_ = cwd_;
+                saveSettings();
+                setText(P_WRITE, "Speicherort gesetzt");
+                setupTexts();
+            }
+        }
+        saveHerePrev_ = sh;
     }
 
     void workerMain()
@@ -932,6 +982,7 @@ private:
         using clock = std::chrono::steady_clock;
         writeTest();
         lastDir_ = settingsValue("lastdir");
+        saveDir_ = settingsValue("savedir");
         cwd_ = (!lastDir_.empty() && isDir(lastDir_)) ? lastDir_ : std::string();
         listDirNow();
         clock::time_point cutChanged{}, lastSlow{};
@@ -951,6 +1002,7 @@ private:
             if (!want.empty() && loadPath(want)) cutAndPublish();
 
             handleButtons();
+            if (bankReset_.exchange(false)) { notifyHostParameterChanged(P_BANK); requestDisplayUpdate(); }
             if (learning_.load() && learnStep_.load() >= kPads) { finishLearning(); setupTexts(); }
             if (lastDirDirty_) { lastDirDirty_ = false; saveSettings(); }
 
@@ -1012,6 +1064,9 @@ private:
     bool readerEver_ = false;
     std::vector<Entry> entries_;
     std::string cwd_, lastDir_;   // "" = the drive list, "*" = every mount
+    std::string saveDir_;         // SPEICHERORT HIER ("" = next to the sample)
+    int saveHereSeen_ = 0, saveHerePrev_ = 0;
+    std::atomic<bool> bankReset_{false};
     int top_ = 0;                 // first row shown
     bool lastDirDirty_ = false;
     int btnSeen_[kButtons] = {}, btnPrev_[kButtons] = {};

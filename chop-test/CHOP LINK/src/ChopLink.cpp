@@ -7,10 +7,13 @@
 //   FOLLOW = Noten: the notes of this track are pulled into CHOP TEST's key (natural minor / major).
 // STATUS and INFO show whether the link works and what CHOP TEST is doing.
 //
-// Signal flow: note -> one voice (sine + a little 2nd harmonic, soft clip) -> decay envelope -> VOLUME -> out 1/2.
+// Signal flow: note -> one bass voice: saw (PolyBLEP) + sine one octave down -> low-pass (SVF) that opens on the
+//              hit and closes with the envelope -> soft saturation -> amp envelope (short attack, decay) -> VOLUME.
 // No worker thread: the link is opened in prepare(); the texts are built on the UI thread from atomics.
 
 #include "mpc_plugin.h"
+#include "dsp/oscillator.h"
+#include "dsp/svf.h"
 #include "../../common/chop_link.h"
 
 #include <chrono>
@@ -26,14 +29,6 @@ const char* const kNotes[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab",
 const char* const kQual[8] = {"", "m", "7", "maj7", "m7", "m9", "dim", "sus4"}; // hh::Quality order
 const int kMinor[7] = {0, 2, 3, 5, 7, 8, 10};
 const int kMajor[7] = {0, 2, 4, 5, 7, 9, 11};
-
-// sine from a phase 0..1 without std::sin per sample (parabolic approximation, plenty for a test tone)
-inline float fastSin(float ph)
-{
-    float x = ph * 2.f - 1.f;          // -1..1
-    float y = 4.f * x * (1.f - std::fabs(x));
-    return -(y * (0.775f + 0.225f * std::fabs(y)));
-}
 
 } // namespace
 
@@ -55,7 +50,7 @@ public:
         i.name = "CHOP LINK";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'l');
-        i.version = 2000;
+        i.version = 3000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -65,10 +60,14 @@ public:
     void prepare(double sampleRate, int) override
     {
         sr_ = sampleRate;
+        saw_.setSampleRate(sampleRate);
+        saw_.setWave(mpc::dsp::Wave::Saw);
+        sub_.setSampleRate(sampleRate);
+        filt_.setSampleRate(sampleRate);
         if (!opened_) { opened_ = true; link_.open(); }
     }
 
-    void reset() override { env_ = 0.f; gainSmooth_ = -1.f; }
+    void reset() override { env_ = 0.f; fenv_ = 0.f; gainSmooth_ = -1.f; filt_.reset(); }
 
     void process(ProcessContext& ctx) override
     {
@@ -99,7 +98,8 @@ public:
         if (gainSmooth_ < 0.f) gainSmooth_ = target;
         float* outL = ctx.outputs[0];
         float* outR = ctx.numOutputs > 1 ? ctx.outputs[1] : nullptr;
-        const float decay = std::exp(-1.f / (float)(sr_ * (followChop ? 0.35 : 0.8)));
+        const float decay = std::exp(-1.f / (float)(sr_ * (followChop ? 0.45 : 0.9)));
+        const float fdecay = std::exp(-1.f / (float)(sr_ * 0.12));
         int ev = 0;
         for (int i = 0; i < ctx.numFrames; ++i)
         {
@@ -111,14 +111,14 @@ public:
                 else if (e.isNoteOff() && e.note() == heldNote_) released_ = true;
             }
             gainSmooth_ += (target - gainSmooth_) * 0.002f;
-            if (attack_ < 1.f) attack_ = std::fmin(1.f, attack_ + 0.01f);
+            if (attack_ < 1.f) attack_ = std::fmin(1.f, attack_ + 0.004f);
             env_ *= released_ ? decay * decay : decay;
-            float s = fastSin(phase_) + 0.25f * fastSin(phase2_);
-            phase_ += inc_; if (phase_ >= 1.f) phase_ -= 1.f;
-            phase2_ += 2.f * inc_; if (phase2_ >= 1.f) phase2_ -= 1.f;
-            float y = s * env_ * attack_ * vel_;
-            y = y / (1.f + std::fabs(y)); // soft clip
-            y *= gainSmooth_;
+            fenv_ *= fdecay;
+            if ((ctrl_++ & 15) == 0) filt_.set(90.f + 2600.f * fenv_ * vel_ + 300.f * env_, 0.35f); // every 16 samples
+            float raw = 0.55f * saw_.process() + 0.8f * sub_.process();
+            float y = filt_.process(raw, mpc::dsp::SVF::Mode::Lowpass);
+            y = y * 1.6f / (1.f + std::fabs(y * 1.6f));  // warm saturation
+            y *= env_ * attack_ * vel_ * gainSmooth_;
             outL[i] = y;
             if (outR) outR[i] = y;
         }
@@ -154,7 +154,10 @@ public:
 private:
     void noteOn(int note, float vel)
     {
-        inc_ = (float)(440.0 * std::pow(2.0, (note - 69) / 12.0) / sr_);
+        float hz = (float)(440.0 * std::pow(2.0, (note - 69) / 12.0));
+        saw_.setFrequency(hz);
+        sub_.setFrequency(hz * 0.5f);
+        fenv_ = 1.f;
         env_ = 1.f;
         attack_ = 0.f;
         vel_ = 0.3f + 0.7f * vel;
@@ -178,7 +181,11 @@ private:
     bool opened_ = false;
     double sr_ = 44100.0;
     uint32_t lastTrig_ = 0;
-    float phase_ = 0.f, phase2_ = 0.f, inc_ = 0.f, env_ = 0.f, attack_ = 1.f, vel_ = 1.f, gainSmooth_ = -1.f;
+    mpc::dsp::PolyBlepOsc saw_;
+    mpc::dsp::WavetableSine sub_;
+    mpc::dsp::SVF filt_;
+    unsigned ctrl_ = 0;
+    float env_ = 0.f, fenv_ = 0.f, attack_ = 1.f, vel_ = 1.f, gainSmooth_ = -1.f;
     int heldNote_ = -1;
     bool released_ = false;
     // UI thread only
