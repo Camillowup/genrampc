@@ -1,0 +1,19 @@
+{
+  "pages": [
+    { "name": "BASS",
+      "controls": [
+        { "param": "SOUND", "widget": "switch" },
+        { "param": "TONE", "widget": "knob" },
+        { "param": "DECAY", "widget": "knob" },
+        { "param": "GLIDE", "widget": "knob" },
+        { "param": "FOLLOW", "widget": "switch" },
+        { "param": "OCT", "widget": "knob", "polarity": "bipolar" },
+        { "param": "KEY LOCK", "widget": "switch" },
+        { "param": "NEW", "widget": "switch" },
+        { "param": "VOLUME", "widget": "knob" },
+        { "param": "STATUS", "widget": "slider" },
+        { "param": "INFO", "widget": "slider" },
+        "empty"
+      ] }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "GENRA BASS",
+  "manufacturer": "Genra",
+  "version": "0.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnBs",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/genra-bass-arm32.so",
+  "file64": "VST/genra-bass-arm64.so",
+  "description": "The bass companion of GENRA CHOP: plays the bass line of GENRA CHOP's loop on the MPC's transport (or follows its chops), KEY LOCK pulls the pads into GENRA CHOP's key.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}
