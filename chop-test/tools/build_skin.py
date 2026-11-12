@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """build_skin.py - writes CHOP TEST's Plugin Skins: three hand-made pages BROWSER, PADS and SETUP.
 
-The SDK's gen_ui.py lays out pages of 16 controls. CHOP TEST needs rows and pads to tap, big buttons and texts the
-plugin changes live. This script uses gen_ui's own building blocks (same JSON shapes, same writer with its duplicate
-"version" keys). The knobs (MODUS, CHOPS, PITCH, VOLUME) and the LISTE slider reuse the component definitions gen_ui
-builds from ui.json; the page gen_ui would make from ui.json itself is dropped. Images come from skin-extra/.
+The SDK's gen_ui.py lays out pages of 16 controls. CHOP TEST needs rows and pads to tap, big buttons, a waveform and
+texts the plugin changes live. This script uses gen_ui's own building blocks (same JSON shapes, same writer with its
+duplicate "version" keys). The knobs (MODUS, CHOPS, PITCH, VOLUME) and the LISTE slider reuse the component
+definitions gen_ui builds from ui.json; the page gen_ui would make from ui.json itself is dropped.
+
+What the MPC showed us: fixed texts in a skin are not drawn, texts from the plugin are. So every caption is a
+parameter ("CAP <key>"). Images bound to a button are drawn at their native size; other images are scaled to their
+bounds. Images come from skin-extra/ (tools/make_images.py draws them). The look follows GENRA CHOP in VCV Rack.
 
 Usage (after sdk/tools/build.py has built the plugin):
     python chop-test/tools/build_skin.py "chop-test/CHOP TEST"
@@ -19,8 +23,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "sdk", "tools"
 import gen_ui as G  # noqa: E402
 
 ROWS = 10
-PADS = 16
+BARS = 64
+BAR_FRAMES = 48
+
+BEIGE = "ffd9d3c4"
+TEXT = "ff2c2c2c"
+MUTED = "ff736d62"
+LCD_TEXT = "ff1f2a18"
 WHITE = "ffffffff"
+RED = "ffc8282d"
 CENTRED = "horizontallyCentred verticallyCentred"
 LEFT = "left verticallyCentred"
 
@@ -28,12 +39,12 @@ LEFT = "left verticallyCentred"
 class Page:
     """Children of one tab, plus helpers. h = parameter name -> handle ("Parameter N")."""
 
-    def __init__(self, h, style, defs):
-        self.h, self.style, self.defs, self.c = h, style, defs, []
+    def __init__(self, h, defs):
+        self.h, self.defs, self.c = h, defs, []
 
-    def image(self, png, b, name=None):
+    def image(self, png, b):
         data = G.obj(("version", 2), ("imageType", "Regular"), ("colour", "0"), ("image", png))
-        self.c.append(G.entry(name or "img %d" % len(self.c), "Image", data, b, "No", "Show", "Always"))
+        self.c.append(G.entry("img %d" % len(self.c), "Image", data, b, "No", "Show", "Always"))
 
     def strip(self, png, frames, param, b):
         data = G.obj(("version", 2), ("imageType", "FilmStrip"), ("colour", "0"), ("image", png),
@@ -41,27 +52,29 @@ class Page:
         self.c.append(G.entry("strip %d" % len(self.c), "Image", data, b, "No", "Show", "Always",
                               remap=[("Data", self.h[param])]))
 
-    def value(self, param, b, height, colour=WHITE, just=LEFT):
+    def value(self, param, b, height, colour=TEXT, just=LEFT):
         self.c.append(G.entry("value %d" % len(self.c), "Label", G.label_data("Value", colour, height, just), b,
                               "No", "Show", "Always", remap=[("Data", self.h[param])]))
 
-    def text(self, text, b, height, colour=WHITE, just=LEFT):
-        self.c.append(G.entry("text %d" % len(self.c), "Label", G.label_data("Text", colour, height, just, text), b,
-                              "No", "Show", "Always"))
+    def caption(self, key, b, height, colour=TEXT, just=LEFT):
+        """Fixed texts in the skin are not drawn on the MPC; the plugin serves each caption as "CAP <key>"."""
+        self.value("CAP " + key, b, height, colour, just)
 
     def button(self, param, png, b, button_id=1, group=1, off_png=None):
         self.c.append(G.entry("button %d" % len(self.c), "Button",
                               G.button_data(png, off_png or png, button_id, group), b, "No", "Show", "Always",
                               remap=[("Data", self.h[param])]))
 
-    def caption(self, key, b, height, colour=WHITE, just=LEFT):
-        """Fixed texts in the skin are not drawn on the MPC; the plugin serves each caption as "CAP <key>"."""
-        self.value("CAP " + key, b, height, colour, just)
-
-    def big_button(self, param, bg, clear, key, b, height=34.0):
-        self.image(bg, b)
-        self.caption(key, b, height, WHITE, CENTRED)
-        self.button(param, clear, b)
+    def flash_button(self, param, flash, strip_png, b, key=None, text_param=None, height=32.0, colour=WHITE):
+        """A button: its image is a 2-frame film strip bound to the flash parameter (it lights up when tapped),
+        a caption on top (a CAP key, or a text parameter), an invisible button over all of it."""
+        x, y, w, hgt = b.split()
+        self.strip(strip_png, 2, "BLITZ %d" % (flash + 1), b)
+        if key:
+            self.caption(key, b, height, colour, CENTRED)
+        if text_param:
+            self.value(text_param, b, height, colour, CENTRED)
+        self.button(param, "clear_%sx%s.png" % (w, hgt), b)
 
     def control(self, param, b):
         """A knob / slider slot (278 x 107) using the definition gen_ui made for this parameter."""
@@ -69,75 +82,92 @@ class Page:
                               "Yes", "Hide", "Always", remap=[("Data", self.h[param])]))
 
     def tab(self, name, index, qlink_bounds):
-        comp = G.component_definition([], self.c, self.style["background"])
+        comp = G.component_definition([], self.c, BEIGE)
         return G.obj(("version", 1), ("tabName", name), ("fnKeyIndex", index), ("fnKeySubIndex", 0),
                      ("componentDefinition", comp), ("qlinkBoundsData", list(qlink_bounds)))
 
 
+# flash numbers (enum Flash in ChopTest.cpp)
+F_BACK, F_DRIVES, F_PGUP, F_PGDN, F_SAVEHERE, F_SAVE, F_CHOKE, F_LEARN, F_REV, F_PDOWN, F_PUP, F_LOCK, F_ROW0 = range(13)
+
+
 def browser(p):
-    muted = p.style["muted"]
-    p.image("br_path.png", "20 6 1240 52")
-    p.value("PFAD", "38 6 1210 52", 30.0)
+    p.image("lcd.png", "20 6 1240 50")
+    p.value("PFAD", "38 6 1210 50", 28.0, LCD_TEXT)
     for k in range(ROWS):
-        y = 66 + k * 52
-        p.image("br_row.png", "20 %d 880 48" % y)
-        p.value("ZEILE %d" % (k + 1), "38 %d 850 48" % y, 28.0)
-        p.button("TIPP %d" % (k + 1), "br_clear_row.png", "20 %d 880 48" % y)
-    p.big_button("ZURUECK", "br_red.png", "clear_big90.png", "back", "920 66 340 90")
-    p.big_button("LAUFWERKE", "br_purple.png", "clear_big90.png", "drives", "920 164 340 90")
-    p.big_button("SEITE ZURUECK", "br_grey.png", "clear_small90.png", "pgup", "920 262 165 90")
-    p.big_button("SEITE VOR", "br_grey.png", "clear_small90.png", "pgdn", "1095 262 165 90")
-    p.big_button("SPEICHERORT HIER", "br_save.png", "clear_savehere.png", "savehere", "920 360 340 70", 28.0)
-    p.value("LISTINFO", "920 434 340 36", 24.0, muted, CENTRED)
-    p.control("LISTE", "951 472 278 107")
-    p.caption("loaded", "20 584 150 40", 26.0, muted)
-    p.value("GELADEN", "170 584 1090 40", 28.0, p.style["accent"])
+        y = 64 + k * 50
+        b = "20 %d 880 46" % y
+        p.strip("row.png", 2, "BLITZ %d" % (F_ROW0 + k + 1), b)
+        p.value("ZEILE %d" % (k + 1), "38 %d 850 46" % y, 26.0)
+        p.button("TIPP %d" % (k + 1), "clear_880x46.png", b)
+    p.flash_button("ZURUECK", F_BACK, "btn_dark_340x80.png", "920 64 340 80", key="back")
+    p.flash_button("LAUFWERKE", F_DRIVES, "btn_dark_340x80.png", "920 152 340 80", key="drives")
+    p.flash_button("SEITE ZURUECK", F_PGUP, "btn_dark_165x80.png", "920 240 165 80", key="pgup")
+    p.flash_button("SEITE VOR", F_PGDN, "btn_dark_165x80.png", "1095 240 165 80", key="pgdn")
+    p.flash_button("SPEICHERORT HIER", F_SAVEHERE, "btn_yellow_340x70.png", "920 328 340 70", key="savehere",
+                   height=26.0, colour=TEXT)
+    p.value("LISTINFO", "920 404 340 32", 22.0, TEXT, CENTRED)
+    p.image("panel_dark.png", "920 438 340 112")
+    p.control("LISTE", "951 440 278 107")
+    p.caption("loaded", "20 572 150 44", 26.0, MUTED)
+    p.value("GELADEN", "170 572 1090 44", 28.0, RED)
 
 
 def pads(p):
-    accent = p.style["accent"]
-    p.image("br_path.png", "20 6 1240 52")
-    p.value("GELADEN", "38 6 400 52", 28.0, accent)
-    p.value("TONART", "450 6 200 52", 26.0)
-    p.value("TEMPO", "660 6 360 52", 26.0)
-    p.value("CHOPINFO", "1030 6 220 52", 26.0)
-    for r in range(4):          # r = 0 is the top row: pads 13-16, like on the MPC
+    # LCD bar
+    p.image("lcd.png", "20 4 1240 46")
+    p.value("GELADEN", "38 4 400 46", 24.0, LCD_TEXT)
+    p.value("TONART", "450 4 200 46", 24.0, LCD_TEXT)
+    p.value("TEMPO", "660 4 360 46", 24.0, LCD_TEXT)
+    p.value("CHOPINFO", "1030 4 220 46", 24.0, LCD_TEXT)
+    # the waveform: 64 bars, one film strip each (height x playing x border)
+    p.image("panel_dark.png", "20 54 1240 88")
+    for b in range(BARS):
+        p.strip("wave_strip.png", BAR_FRAMES, "WELLE %d" % (b + 1), "%d 56 19 84" % (32 + b * 19))
+    # the pads, 1-4 at the bottom like on the MPC
+    for r in range(4):
         for col in range(4):
             k = (3 - r) * 4 + col
-            x, y = 20 + col * 150, 66 + r * 122
-            p.strip("pad_strip.png", 2, "LICHT %d" % (k + 1), "%d %d 140 112" % (x, y))
-            p.value("NUMMER %d" % (k + 1), "%d %d 116 44" % (x + 14, y + 6), 32.0)
-            p.value("AKKORD %d" % (k + 1), "%d %d 116 44" % (x + 14, y + 58), 28.0)
-            p.button("PAD %d" % (k + 1), "clear_pad.png", "%d %d 140 112" % (x, y))
-    p.control("MODUS", "650 66 278 107")
-    p.control("CHOPS", "960 66 278 107")
-    p.control("PITCH", "650 183 278 107")
-    p.control("VOLUME", "960 183 278 107")
+            x, y = 20 + col * 150, 150 + r * 108
+            b = "%d %d 140 100" % (x, y)
+            p.strip("pad_strip.png", 2, "LICHT %d" % (k + 1), b)
+            p.value("NUMMER %d" % (k + 1), "%d %d 116 32" % (x + 12, y + 4), 28.0)
+            p.value("AKKORD %d" % (k + 1), "%d %d 116 30" % (x + 12, y + 36), 24.0)
+            p.value("MARKEN %d" % (k + 1), "%d %d 116 26" % (x + 12, y + 68), 20.0, RED)
+            p.button("PAD %d" % (k + 1), "clear_140x100.png", b)
+    p.value("ZULETZT", "20 584 600 40", 24.0)
+    # knobs on a dark section, like the panels of GENRA CHOP
+    p.image("panel_dark.png", "640 150 620 236")
+    p.control("MODUS", "650 160 278 107")
+    p.control("CHOPS", "960 160 278 107")
+    p.control("PITCH", "650 270 278 107")
+    p.control("VOLUME", "960 270 278 107")
     for i, name in enumerate("ABCD"):
-        b = "%d 310 140 90" % (650 + i * 152)
+        b = "%d 396 140 60" % (650 + i * 152)
         p.button("BANK", "bank_on.png", b, button_id=i, group=4, off_png="bank_off.png")
-        p.caption("bank" + name, b, 40.0, WHITE, CENTRED)
-    p.big_button("CHOP SPEICHERN", "br_save.png", "clear_half.png", "save", "650 420 295 100", 30.0)
-    # CHOKE: its caption comes from the plugin and says the state ("CHOKE AN" / "CHOKE AUS")
-    p.image("br_purple.png", "955 420 295 100")
-    p.value("CHOKETEXT", "955 420 295 100", 30.0, WHITE, CENTRED)
-    p.button("CHOKE", "clear_half.png", "955 420 295 100")
-    p.value("ZULETZT", "20 560 1240 44", 26.0)
+        p.caption("bank" + name, b, 34.0, WHITE, CENTRED)
+    p.flash_button("CHOP SPEICHERN", F_SAVE, "btn_yellow_295x60.png", "650 466 295 60", key="save", height=26.0,
+                   colour=TEXT)
+    p.flash_button("CHOKE", F_CHOKE, "btn_dark_295x60.png", "955 466 295 60", text_param="CHOKETEXT", height=26.0)
+    # edit row: the last played chop
+    p.value("EDITTEXT", "640 534 236 44", 20.0)
+    for i, (param, flash, key) in enumerate((("ED REV", F_REV, "rev"), ("ED PITCH AB", F_PDOWN, "pdown"),
+                                             ("ED PITCH AUF", F_PUP, "pup"), ("ED LOCK", F_LOCK, "lock"))):
+        p.flash_button(param, flash, "btn_dark_90x44.png", "%d 534 90 44" % (880 + i * 95), key=key, height=18.0)
 
 
 def setup(p):
-    muted = p.style["muted"]
-    p.big_button("LERNEN", "br_learn.png", "clear_learn.png", "learn", "20 20 400 140", 44.0)
-    p.value("LERNINFO", "20 175 400 50", 28.0)
-    p.caption("help1", "20 240 400 36", 24.0, muted)
-    p.caption("help2", "20 276 400 36", 24.0, muted)
-    p.caption("help3", "20 312 400 36", 24.0, muted)
+    p.flash_button("LERNEN", F_LEARN, "btn_red_400x130.png", "20 20 400 130", key="learn", height=44.0)
+    p.value("LERNINFO", "20 165 400 50", 28.0)
+    p.caption("help1", "20 230 400 36", 24.0, MUTED)
+    p.caption("help2", "20 266 400 36", 24.0, MUTED)
+    p.caption("help3", "20 302 400 36", 24.0, MUTED)
     for i, (key, param) in enumerate((("r1", "BELEGUNG"), ("r2", "LAUFWERKSLISTE"), ("r3", "SCHREIBEN"),
                                       ("r4", "CHOP LINK"), ("r5", "ANALYSE"), ("r6", "SPEICHERORT"))):
         y = 20 + i * 70
-        p.image("br_row.png", "450 %d 810 60" % y)
-        p.caption(key, "470 %d 220 60" % y, 26.0, muted)
-        p.value(param, "690 %d 560 60" % y, 26.0)
+        p.image("setup_row.png", "450 %d 810 60" % y)
+        p.caption(key, "470 %d 220 60" % y, 24.0, MUTED)
+        p.value(param, "690 %d 560 60" % y, 24.0)
 
 
 def main():
@@ -165,14 +195,13 @@ def main():
     tabs = dict(page_data)["tabs"]
     del tabs[:]
     # the Q-Link highlight: around LISTE (browser), around the four knobs (pads), none (setup)
-    pages = (("BROWSER", browser, ["941 464 298 123"]), ("PADS", pads, ["640 56 608 244"]), ("SETUP", setup, []))
+    pages = (("BROWSER", browser, ["930 440 320 108"]), ("PADS", pads, ["645 155 610 226"]), ("SETUP", setup, []))
     for i, (name, fn, ql) in enumerate(pages):
-        pg = Page(h, style, defs)
+        pg = Page(h, defs)
         fn(pg)
         tabs.append(pg.tab(name, i, ql))
-    # BANK steps through A-D on the data wheel too
     for k, v in page_data:
-        if k == "replacementStrings":
+        if k == "replacementStrings":   # BANK steps through A-D on the data wheel too
             v.append(G.obj(("key", h["BANK"]), ("value", ["A", "B", "C", "D"])))
 
     def qmap(assign):
