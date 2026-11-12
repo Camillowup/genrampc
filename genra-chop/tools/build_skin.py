@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""build_skin.py - writes GENRA CHOP's Plugin Skins: the pages BROWSER, CHOP and SETUP, and draws every image.
+"""build_skin.py - writes the Plugin Skins of GENRA CHOP, GENRA BASS and SCHLAG and draws every image.
 
-Look: the retro MPC (beige panel, grey and red keys, dark displays with cream text). The MPC draws images at their
-native size (nothing is scaled), so every box is drawn here at exactly the size the layout asks for; the PNGs are
-written with the standard library only (zlib). Fixed texts in a skin are not drawn on the MPC: every caption is a
-read-only parameter the plugin serves ("CAP <key>"). Film strips (display columns, chop slots, steps, lane cells,
-lamps) get their frame from the plugin as the parameter's value.
+Look: the retro MPC (beige panel, grey and red keys, dark fields with cream text, green LCDs like the MPC 2000 where
+the drafts want them). The MPC draws images at their native size (nothing is scaled), so every box is drawn here at
+exactly the size the layout asks for; the PNGs are written with the standard library only (zlib). Fixed texts in a
+skin are not drawn on the MPC: every caption is a read-only parameter the plugin serves ("CAP <key>"). Film strips
+(display columns, slots, steps, cells, lamps, flashes) get their frame from the plugin as the parameter's value.
 
 Usage (after sdk/tools/build.py has built the plugin):
-    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"
+    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"     (or "GENRA BASS", "SCHLAG")
 """
 
+import json
 import math
 import os
 import struct
@@ -21,32 +22,44 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "sdk", "tools")))
 import gen_ui as G  # noqa: E402
 
-# ------------------------------------------------------------------ colours (RGB) and label colours (ARGB)
 DARK = (0x2B, 0x2D, 0x2A)
 CREAM = (0xE8, 0xDF, 0xC4)
 RED = (0xC0, 0x32, 0x2B)
 RED_LIT = (0xE0, 0x50, 0x3F)
 GREY = (0xB9, 0xB2, 0xA0)
 KEY_OFF = (0x7E, 0x7C, 0x75)
+PAD = (0x8C, 0x8B, 0x85)
 LANE = (0x5A, 0x5C, 0x58)
 KNOB = (0x3A, 0x3A, 0x37)
-SEL_BG = (0x47, 0x42, 0x3B)
+LCD = (0xB9, 0xC4, 0x6A)      # MPC 2000 green
+LCD_SEL = (0xA3, 0xB0, 0x54)
+LCD_DIM = (0x9A, 0xA6, 0x54)
+LCD_INK = (0x26, 0x30, 0x1A)
+DEAD = (0x4A, 0x54, 0x20)     # a dying LCD
+DEAD_INK = (0x2C, 0x34, 0x12)
+DEAD_DIM = (0x3F, 0x48, 0x19)
+BLOB = (0x1C, 0x22, 0x09)
 
 L_DARK = "ff2a2926"
 L_MUTED = "ff5a5850"
 L_CREAM = "ffe8dfc4"
 L_CREAM_MUTED = "ffb9b2a0"
+L_PAD = "fff4efe2"
 L_WHITE = "ffffffff"
 L_RED = "ffc0322b"
+L_LCD = "ff26301a"
+L_DEAD = "ff39421a"
 CENTRED = "horizontallyCentred verticallyCentred"
 LEFT = "left verticallyCentred"
 RIGHT = "right verticallyCentred"
-
-ROWS, PADS, COLS, LANES = 10, 16, 124, 4
-COL_W, COL_H, COL_FRAMES, COL_LEVELS = 10, 136, 48, 16
+VOICE_NAMES = ["KICK", "SNARE", "CLAP", "RIM", "HAT ZU", "HAT OFFEN", "TOM", "PERC"]
 
 
-# ------------------------------------------------------------------ PNG drawing (RGBA rows of bytearrays)
+def lighter(c, k=40):
+    return tuple(min(255, v + k) for v in c)
+
+
+# ------------------------------------------------------------------ PNG drawing
 class Img:
     def __init__(self, w, h):
         self.w, self.h = w, h
@@ -54,37 +67,42 @@ class Img:
 
     def put(self, x, y, rgb, a=255):
         if 0 <= x < self.w and 0 <= y < self.h:
-            r = self.px[y]
-            r[x * 4:x * 4 + 4] = bytes((rgb[0], rgb[1], rgb[2], a))
+            self.px[y][x * 4:x * 4 + 4] = bytes((rgb[0], rgb[1], rgb[2], a))
+
+    @staticmethod
+    def _inside(x, y, x0, y0, w, h, r):
+        if not r:
+            return True
+        dx = max(x0 + r - x - 0.5, 0, x - (x0 + w - r) + 0.5)
+        dy = max(y0 + r - y - 0.5, 0, y - (y0 + h - r) + 0.5)
+        return dx * dx + dy * dy <= r * r
 
     def rect(self, x0, y0, w, h, rgb, radius=0):
         for y in range(max(0, y0), min(self.h, y0 + h)):
             for x in range(max(0, x0), min(self.w, x0 + w)):
-                if radius:
-                    dx = max(x0 + radius - x - 0.5, 0, x - (x0 + w - radius) + 0.5)
-                    dy = max(y0 + radius - y - 0.5, 0, y - (y0 + h - radius) + 0.5)
-                    if dx * dx + dy * dy > radius * radius:
-                        continue
-                self.put(x, y, rgb)
+                if self._inside(x, y, x0, y0, w, h, radius):
+                    self.put(x, y, rgb)
 
     def outline(self, x0, y0, w, h, rgb, t, radius=0):
         for y in range(y0, y0 + h):
             for x in range(x0, x0 + w):
-                inner = x0 + t <= x < x0 + w - t and y0 + t <= y < y0 + h - t
-                if inner:
+                if x0 + t <= x < x0 + w - t and y0 + t <= y < y0 + h - t:
                     continue
-                if radius:
-                    dx = max(x0 + radius - x - 0.5, 0, x - (x0 + w - radius) + 0.5)
-                    dy = max(y0 + radius - y - 0.5, 0, y - (y0 + h - radius) + 0.5)
-                    if dx * dx + dy * dy > radius * radius:
-                        continue
-                self.put(x, y, rgb)
+                if self._inside(x, y, x0, y0, w, h, radius):
+                    self.put(x, y, rgb)
 
     def disc(self, cx, cy, r, rgb):
         for y in range(int(cy - r - 1), int(cy + r + 2)):
             for x in range(int(cx - r - 1), int(cx + r + 2)):
                 if (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r:
                     self.put(x, y, rgb)
+
+    def ellipse(self, cx, cy, rx, ry, rgb, clip=None):
+        for y in range(int(cy - ry - 1), int(cy + ry + 2)):
+            for x in range(int(cx - rx - 1), int(cx + rx + 2)):
+                if ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1.0:
+                    if clip is None or clip(x, y):
+                        self.put(x, y, rgb)
 
     def line(self, x0, y0, x1, y1, rgb, width):
         n = int(max(abs(x1 - x0), abs(y1 - y0)) * 2) + 1
@@ -94,6 +112,7 @@ class Img:
 
     def png(self):
         raw = b"".join(b"\x00" + bytes(r) for r in self.px)
+
         def chunk(t, d):
             return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
         return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", self.w, self.h, 8, 6, 0, 0, 0))
@@ -101,7 +120,6 @@ class Img:
 
 
 def strip(frames):
-    """Stack frames (Img of the same size) into one vertical film strip."""
     out = Img(frames[0].w, frames[0].h * len(frames))
     for i, f in enumerate(frames):
         for y in range(f.h):
@@ -109,9 +127,25 @@ def strip(frames):
     return out
 
 
-class Images:
-    """Draws each image once, on demand, named after what it is."""
+def dying(img, w, h, seed):
+    """The damage of a dying LCD over a box: a dark bubble and a dead line."""
+    cx = w * (0.72 if seed % 2 else 0.28)
+    inside = lambda x, y: 0 <= x < w and 0 <= y < h and img.px[y][x * 4 + 3] > 0  # noqa: E731
+    img.ellipse(cx, h * 0.55, max(6, w * 0.3), max(5, h * 0.75), BLOB, inside)
+    img.ellipse(cx + 3, h * 0.5, max(3, w * 0.14), max(3, h * 0.4), (0x0F, 0x13, 0x05), inside)
+    if seed % 3 == 0:
+        x = int(w * 0.4)
+        for y in range(h):
+            if inside(x, y):
+                img.put(x, y, (0x14, 0x19, 0x07))
+    else:
+        y = int(h * 0.35)
+        for x in range(w):
+            if inside(x, y):
+                img.put(x, y, (0x14, 0x19, 0x07))
 
+
+class Images:
     def __init__(self, out_dir):
         self.out_dir, self.done = out_dir, set()
 
@@ -122,52 +156,56 @@ class Images:
             self.done.add(name)
         return name
 
-    def box(self, rgb, w, h, radius=6):
+    def box(self, rgb, w, h, radius=6, dead=0):
         def make():
             i = Img(w, h)
             i.rect(0, 0, w, h, rgb, min(radius, w // 2, h // 2))
+            if dead:
+                dying(i, w, h, dead)
             return i
-        return self._write("box_%02x%02x%02x_%dx%d.png" % (rgb + (w, h)), make)
+        return self._write("box_%02x%02x%02x_%dx%d%s.png" % (rgb + (w, h, "_d%d" % dead if dead else "")), make)
 
     def clear(self, w, h):
         return self._write("clear_%dx%d.png" % (w, h), lambda: Img(w, h))
 
-    def columns(self):
+    def two(self, a, b, w, h, radius=6):
+        def make():
+            fr = []
+            for c in (a, b):
+                i = Img(w, h)
+                i.rect(0, 0, w, h, c, min(radius, w // 2, h // 2))
+                fr.append(i)
+            return strip(fr)
+        return self._write("two_%02x%02x%02x_%02x%02x%02x_%dx%d.png" % (a + b + (w, h)), make)
+
+    def columns(self, w=10, h=136):
         def frame(state, level):
-            i = Img(COL_W, COL_H)
-            i.rect(0, 0, COL_W, COL_H, SEL_BG if state == 2 else DARK)
-            bh = max(2, int(round((level + 1) / COL_LEVELS * (COL_H - 16))))
-            i.rect(1, (COL_H - bh) // 2, 7, bh, (255, 255, 255) if state == 2 else CREAM, 1)
+            i = Img(w, h)
+            i.rect(0, 0, w, h, LCD_SEL if state == 2 else LCD)
+            bh = max(2, int(round((level + 1) / 16.0 * (h - 16))))
+            i.rect(1, (h - bh) // 2, w - 3, bh, LCD_INK, 1)
             if state == 1:
-                i.rect(0, 0, 2, COL_H, RED_LIT)
+                i.rect(0, 0, 3, h, RED_LIT)
             return i
-        return self._write("col_strip.png", lambda: strip([frame(s, l) for s in range(3) for l in range(COL_LEVELS)]))
+        return self._write("col_strip.png", lambda: strip([frame(s, l) for s in range(3) for l in range(16)]))
 
     def slots(self):
         def frame(state):
             i = Img(75, 52)
-            i.rect(0, 0, 75, 52, RED if state == 2 else DARK, 5)
+            i.rect(0, 0, 75, 52, RED if state == 2 else PAD, 5)
             if state == 1:
                 i.outline(0, 0, 75, 52, CREAM, 3, 5)
             return i
         return self._write("slot_strip.png", lambda: strip([frame(s) for s in range(3)]))
 
-    def steps(self):
-        def frame(on):
-            i = Img(72, 12)
-            i.rect(0, 0, 72, 12, RED if on else GREY, 3)
-            return i
-        return self._write("step_strip.png", lambda: strip([frame(s) for s in range(2)]))
-
     def cells(self):
         def frame(f):
             i = Img(26, 36)
-            note, now = f & 1, f >= 2
-            if note:
+            if f & 1:
                 i.rect(2, 4, 22, 22, CREAM, 3)
             else:
                 i.rect(10, 13, 6, 6, (0x6E, 0x70, 0x6B), 1)
-            if now:
+            if f >= 2:
                 i.rect(0, 31, 26, 5, RED_LIT, 2)
             return i
         return self._write("cell_strip.png", lambda: strip([frame(f) for f in range(4)]))
@@ -179,19 +217,58 @@ class Images:
             return i
         return self._write("lamp_strip.png", lambda: strip([frame(f) for f in range(2)]))
 
-    def knob(self):
+    def knob(self, size=64):
         def frame(k):
-            i = Img(64, 64)
-            i.disc(32, 32, 30, KNOB)
+            i = Img(size, size)
+            c = size / 2.0
+            i.disc(c, c, c - 2, KNOB)
             a = math.radians(-135 + 270 * k / 126.0)
-            i.line(32, 32, 32 + 22 * math.sin(a), 32 - 22 * math.cos(a), CREAM, 4)
+            i.line(c, c, c + (c - 10) * math.sin(a), c - (c - 10) * math.cos(a), CREAM, max(3, size // 16))
             return i
-        return self._write("knob64.png", lambda: strip([frame(k) for k in range(127)]))
+        return self._write("knob%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
+
+    def ring(self, size=72):
+        """The endless RANDOM knob: a ring of 24 dots, lit up to the value; no pointer."""
+        def frame(k):
+            i = Img(size, size)
+            c = size / 2.0
+            i.disc(c, c, c - 1, KNOB)
+            lit = int(round(k / 126.0 * 24))
+            for d in range(24):
+                a = d / 24.0 * 2 * math.pi
+                i.disc(c + (c - 8) * math.sin(a), c - (c - 8) * math.cos(a), 2.6, RED_LIT if d < lit else (0x5A, 0x5C, 0x58))
+            i.disc(c, c, c * 0.55, (0x32, 0x32, 0x30))
+            return i
+        return self._write("ring%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
+
+    def line_cols(self, w=19, h=176):
+        """GENRA BASS: one column per step: 0 empty, 1..16 a note at that height, +17 the step that plays."""
+        def frame(f):
+            now, lvl = f >= 17, f % 17
+            i = Img(w, h)
+            i.rect(0, 0, w, h, LCD_SEL if now else LCD)
+            if lvl:
+                y = h - 12 - int((lvl - 1) / 15.0 * (h - 36))
+                i.rect(1, y - 6, w - 2, 10, LCD_INK, 2)
+            if now:
+                i.rect(w // 2 - 1, 0, 3, h, RED_LIT)
+            return i
+        return self._write("line_strip.png", lambda: strip([frame(f) for f in range(34)]))
+
+    def drum_cells(self, dead):
+        def frame(f):
+            i = Img(6, 18)
+            if f == 0:
+                i.rect(0, 0, 6, 18, DEAD_DIM if dead else LCD_DIM, 1)
+            else:
+                i.rect(0, 0, 6, 18, RED if f == 2 else (DEAD_INK if dead else LCD_INK), 1)
+            return i
+        return self._write("dcell%s_strip.png" % ("_d" if dead else ""), lambda: strip([frame(f) for f in range(3)]))
 
 
-# ------------------------------------------------------------------ the pages
+# ------------------------------------------------------------------ pages
 class Page:
-    """Children of one tab. h: parameter name -> handle ("Parameter N")."""
+    flashes = {}  # key parameter -> its flash strip parameter
 
     def __init__(self, h, style, defs, img):
         self.h, self.style, self.defs, self.img, self.c = h, style, defs, img, []
@@ -225,11 +302,26 @@ class Page:
                               "Always", remap=[("Data", self.h[param])]))
 
     def key(self, param, rgb, cap, b, height=24.0, colour=L_WHITE):
-        """A key: a coloured box, its caption, a transparent button on top."""
+        """A key: a box (a 2-frame flash strip if the key flashes), its caption, a transparent button on top."""
         x, y, w, h = [int(v) for v in b.split()]
-        self.image(self.img.box(rgb, w, h), b)
+        flash = self.flashes.get(param)
+        if flash:
+            self.film(self.img.two(rgb, lighter(rgb, 55), w, h), 2, flash, b)
+        else:
+            self.image(self.img.box(rgb, w, h), b)
         self.caption(cap, b, height, colour, CENTRED)
         self.button(param, b)
+
+    def state_key(self, param, state, cap, b, height=20.0):
+        x, y, w, h = [int(v) for v in b.split()]
+        self.film(self.img.two(KEY_OFF, RED, w, h), 2, state, b)
+        self.caption(cap, b, height, L_WHITE, CENTRED)
+        self.button(param, b)
+
+    def toggle(self, param, cap, b, height=20.0):
+        x, y, w, h = [int(v) for v in b.split()]
+        self.button(param, b, 1, 1, self.img.box(RED, w, h), self.img.box(KEY_OFF, w, h))
+        self.caption(cap, b, height, L_WHITE, CENTRED)
 
     def radio(self, param, caps, xs, y, w, h, height=22.0):
         on, off = self.img.box(RED, w, h), self.img.box(KEY_OFF, w, h)
@@ -238,19 +330,32 @@ class Page:
             self.button(param, b, button_id=i, group=len(caps), on_png=on, off_png=off)
             self.caption(cap, b, height, L_WHITE, CENTRED)
 
-    def dark(self, b):
+    def box(self, rgb, b, radius=6, dead=0):
         x, y, w, h = [int(v) for v in b.split()]
-        self.image(self.img.box(DARK, w, h), b)
+        self.image(self.img.box(rgb, w, h, radius, dead), b)
+
+    def dark(self, b):
+        self.box(DARK, b)
+
+    def lcd(self, b, dead=0):
+        self.box(DEAD if dead else LCD, b, 5, dead)
 
     def control(self, param, b):
         self.c.append(G.entry(param, self.defs[param], G.obj(("version", 1), ("handleName", "Data")), b,
                               "Yes", "Hide", "Always", remap=[("Data", self.h[param])]))
 
-    def knob(self, param, x, y):
-        self.c.append(G.entry("knob %s" % param, "Knob", G.knob_filmstrip_data(self.img.knob(), 127),
-                              "%d %d 64 64" % (x, y), "Yes", "Hide", "Always", remap=[("Data", self.h[param])]))
-        self.name(param, "%d %d 92 28" % (x + 70, y + 2), 21.0, L_DARK)
-        self.value(param, "%d %d 92 28" % (x + 70, y + 32), 20.0, L_MUTED)
+    def knob_only(self, param, b, png):
+        self.c.append(G.entry("knob %d" % len(self.c), "Knob", G.knob_filmstrip_data(png, 127), b, "Yes", "Hide",
+                              "Always", remap=[("Data", self.h[param])]))
+
+    def knob(self, param, x, y, size=64, name_colour=L_DARK, value_colour=L_MUTED, below=False):
+        self.knob_only(param, "%d %d %d %d" % (x, y, size, size), self.img.knob(size))
+        if below:
+            self.name(param, "%d %d %d 24" % (x - 40, y + size + 2, size + 80), 17.0, name_colour, CENTRED)
+            self.value(param, "%d %d %d 22" % (x - 40, y + size + 24, size + 80), 15.0, value_colour, CENTRED)
+        else:
+            self.name(param, "%d %d 110 28" % (x + size + 8, y + 2), 21.0, name_colour)
+            self.value(param, "%d %d 110 28" % (x + size + 8, y + 32), 19.0, value_colour)
 
     def tab(self, name, index, qlink_bounds):
         comp = G.component_definition([], self.c, self.style["background"])
@@ -262,108 +367,336 @@ def slot_x(i):
     return 20 + int(round(i * 77.5))
 
 
-def chop_page(p):
-    img = p.img
-    # header
+def print_page(p, title_x, has_dir_buttons):
+    """The PRINT page, the same in every plugin."""
+    p.caption("printtitle", "%d 8 200 48" % title_x, 28.0, L_MUTED)
+    p.key("PRINT", RED, "print", "20 70 400 200", 54.0)
+    p.value("PRINTINFO", "20 280 400 30", 17.0, L_MUTED, CENTRED)
+    p.caption("after", "20 326 300 26", 18.0, L_DARK)
+    p.radio("AUTO PADS", ("auto", "padsmode"), (20, 220), 356, 196, 60, 22.0)
+    p.caption("autoinfo", "20 430 400 26", 17.0, L_MUTED)
+    p.caption("padsinfo", "20 456 400 26", 17.0, L_MUTED)
+    p.lcd("450 70 810 46")
+    p.value("PRINTORDNER", "462 70 790 46", 21.0, L_LCD)
+    for r in range(7):
+        y = 124 + r * 52
+        p.lcd("450 %d 810 46" % y)
+        p.value("PRINTZEILE %d" % (r + 1), "462 %d 790 46" % y, 19.0, L_LCD)
+    if has_dir_buttons:
+        p.key("PRINT HIER", KEY_OFF, "printhere", "450 494 400 60", 20.0)
+        p.key("PRINT STANDARD", KEY_OFF, "printstd", "860 494 400 60", 20.0)
+    p.lcd("20 586 1240 32")
+    p.value("PRINTSTATUS", "32 586 1220 32", 17.0, L_LCD)
+
+
+# ------------------------------------------------------------------ GENRA CHOP
+CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODIE", "NEW PADS", "UNDO", "SAVE WAV", "CHOPS MINUS",
+              "CHOPS PLUS", "STYLE ZURUECK", "STYLE VOR", "PRINT", "LERNEN", "ZURUECK", "LAUFWERKE", "SEITE ZURUECK",
+              "SEITE VOR", "SPEICHERORT HIER", "PRINT HIER", "PRINT STANDARD"]
+
+
+class ChopPage(Page):
+    flashes = {k: "BLITZ %d" % (i + 1) for i, k in enumerate(CHOP_FLASH)}
+
+
+def chop_header(p):
     p.caption("genra", "20 8 120 48", 34.0, L_DARK)
     p.caption("chop", "136 8 110 48", 34.0, L_RED)
+
+
+def chop_page(p):
+    img = p.img
+    chop_header(p)
     p.dark("250 9 330 46")
-    p.value("GELADEN", "262 9 310 46", 23.0, L_CREAM)
-    p.dark("590 9 190 46")
-    p.value("KOPF", "590 9 190 46", 22.0, L_CREAM, CENTRED)
-    p.value("LINKTEXT", "790 9 110 46", 22.0, L_DARK)
-    p.radio("ANSICHT", ("sample", "loop", "chopv"), (906, 1026, 1146), 9, 114, 46, 21.0)
-    # the display: one film strip per column
+    p.value("GELADEN", "262 9 310 46", 22.0, L_CREAM)
+    p.dark("590 9 310 46")
+    p.value("KOPF", "590 9 310 46", 20.0, L_CREAM, CENTRED)
+    p.radio("ANSICHT", ("sample", "loop", "chopv"), (910, 1028, 1146), 9, 112, 46, 19.0)
     cols = img.columns()
-    for i in range(COLS):
-        p.film(cols, COL_FRAMES, "SPALTE %d" % (i + 1), "%d 64 %d %d" % (20 + i * COL_W, COL_W, COL_H))
-    # the chop strip: the 16 chops of the bank
+    for i in range(124):
+        p.film(cols, 48, "SPALTE %d" % (i + 1), "%d 64 10 136" % (20 + i * 10))
     slots = img.slots()
-    for i in range(PADS):
+    for i in range(16):
         x = slot_x(i)
         p.film(slots, 3, "SLOTLICHT %d" % (i + 1), "%d 206 75 52" % x)
-        p.value("SLOTTEXT %d" % (i + 1), "%d 206 71 30" % (x + 4), 19.0, L_CREAM)
-        p.value("SLOTLAENGE %d" % (i + 1), "%d 233 69 22" % (x + 6), 17.0, L_CREAM_MUTED)
+        p.value("SLOTTEXT %d" % (i + 1), "%d 206 71 30" % (x + 4), 18.0, L_PAD)
+        p.value("SLOTLAENGE %d" % (i + 1), "%d 233 71 22" % (x + 4), 15.0, "ffe3ded0")
         p.button("SLOT %d" % (i + 1), "%d 206 75 52" % x)
-    # the 16 steps of the bar that plays
-    steps = img.steps()
-    for i in range(PADS):
+    steps = img.two(GREY, RED, 72, 12, 3)
+    for i in range(16):
         p.film(steps, 2, "SCHRITT %d" % (i + 1), "%d 266 72 12" % slot_x(i))
-    # the lanes
     p.dark("20 288 560 332")
     lamps, cells = img.lamps(), img.cells()
     for k, cap in enumerate(("drums", "bass", "mel", "pads")):
         y = 292 + k * 78
         p.film(lamps, 2, "LAMPE %d" % (k + 1), "32 %d 16 16" % (y + 6))
-        p.caption(cap, "56 %d 160 28" % y, 20.0, L_CREAM)
-        p.value("SPURTEXT %d" % (k + 1), "220 %d 250 28" % y, 18.0, L_CREAM_MUTED, RIGHT)
-        p.image(img.box(LANE, 444, 40, 4), "30 %d 444 40" % (y + 30))
-        for j in range(PADS):
+        p.caption(cap, "56 %d 160 28" % y, 19.0, L_CREAM)
+        p.value("SPURTEXT %d" % (k + 1), "220 %d 250 28" % y, 17.0, L_CREAM_MUTED, RIGHT)
+        p.box(LANE, "30 %d 444 40" % (y + 30), 4)
+        for j in range(16):
             p.film(cells, 4, "ZELLE %d %d" % (k + 1, j + 1), "%d %d 26 36" % (32 + int(round(j * 27.5)), y + 32))
-        p.key("NEW %s" % ("DRUMS", "BASS", "MELODIE", "PADS")[k], RED, "new", "484 %d 86 54" % (y + 13), 22.0)
-    p.value("TAKT", "32 596 300 22", 18.0, L_CREAM_MUTED)
-    # STYLE and NEW ALL
-    p.caption("style", "600 286 120 24", 18.0, L_MUTED)
-    p.dark("600 312 360 52")
-    p.value("STYLE", "614 312 340 52", 24.0, L_CREAM)
-    p.key("STYLE ZURUECK", GREY, "prev", "968 312 46 52", 26.0, L_DARK)
-    p.key("STYLE VOR", GREY, "next", "1020 312 46 52", 26.0, L_DARK)
-    p.key("NEW ALL", RED, "newall", "1076 288 184 76", 30.0)
-    # MODUS, CHOPS, BANK
-    p.caption("modus", "600 370 120 22", 16.0, L_MUTED)
-    p.caption("chops", "826 370 120 22", 16.0, L_MUTED)
-    p.caption("bank", "1006 370 120 22", 16.0, L_MUTED)
-    p.radio("MODUS", ("transient", "equal"), (600, 708), 394, 104, 46, 20.0)
+        p.key("NEW %s" % ("DRUMS", "BASS", "MELODIE", "PADS")[k], RED, "new", "484 %d 86 54" % (y + 13), 21.0)
+    p.value("TAKT", "32 596 300 22", 17.0, L_CREAM_MUTED)
+    p.caption("style", "600 286 120 24", 16.0, L_MUTED)
+    p.lcd("600 312 260 52")
+    p.value("STYLE", "612 312 244 52", 21.0, L_LCD)
+    p.key("STYLE ZURUECK", GREY, "prev", "868 312 46 52", 26.0, L_DARK)
+    p.key("STYLE VOR", GREY, "next", "920 312 46 52", 26.0, L_DARK)
+    p.key("NEW ALL", RED, "newall", "976 288 284 76", 30.0)
+    p.caption("modus", "600 370 120 22", 15.0, L_MUTED)
+    p.caption("chops", "826 370 120 22", 15.0, L_MUTED)
+    p.caption("bank", "1006 370 120 22", 15.0, L_MUTED)
+    p.radio("MODUS", ("transient", "equal"), (600, 708), 394, 104, 46, 18.0)
     p.key("CHOPS MINUS", GREY, "minus", "826 394 44 46", 26.0, L_DARK)
     p.dark("874 394 68 46")
     p.value("CHOPZAHL", "874 394 68 46", 22.0, L_CREAM, CENTRED)
     p.key("CHOPS PLUS", GREY, "plus", "946 394 44 46", 26.0, L_DARK)
     p.radio("BANK", ("bankA", "bankB", "bankC", "bankD"), (1006, 1070, 1134, 1198), 394, 58, 46, 22.0)
-    # UNDO, SAVE WAV, CHOKE, the selected chop
-    p.key("UNDO", GREY, "undo", "600 450 150 46", 21.0, L_DARK)
-    p.key("SAVE WAV", GREY, "savewav", "758 450 150 46", 21.0, L_DARK)
-    p.dark("916 450 150 46")
-    p.value("CHOKETEXT", "916 450 150 46", 21.0, L_CREAM, CENTRED)
-    p.button("CHOKE", "916 450 150 46")
-    p.value("AUSWAHL 1", "1078 450 184 24", 19.0, L_DARK)
-    p.value("AUSWAHL 2", "1078 474 184 22", 17.0, L_MUTED)
-    # the four knobs of the selected chop (one Q-Link group)
+    p.key("UNDO", GREY, "undo", "600 450 84 46", 18.0, L_DARK)
+    p.radio("AUTO PADS", ("auto", "padsmode"), (690, 772), 450, 78, 46, 18.0)
+    p.toggle("CHOKE", "choke", "856 450 96 46", 18.0)
+    p.state_key("REV", "REVLICHT", "rev", "958 450 146 46", 18.0)
+    p.state_key("LOCK", "LOCKLICHT", "lock", "1110 450 150 46", 18.0)
     for i, param in enumerate(("PITCH", "DECAY", "FILTER", "LEVEL")):
         p.knob(param, 600 + i * 165, 508)
-    p.value("STATUS", "600 586 660 30", 19.0, L_DARK)
+    p.lcd("600 586 520 32")
+    p.value("STATUS", "612 586 500 32", 17.0, L_LCD)
+    p.key("SAVE WAV", GREY, "savewav", "1128 586 132 32", 16.0, L_DARK)
 
 
-def browser(p):
+def chop_browser(p):
     p.dark("20 6 1240 52")
-    p.value("PFAD", "38 6 1210 52", 30.0, L_CREAM)
-    for k in range(ROWS):
+    p.value("PFAD", "38 6 1210 52", 28.0, L_CREAM)
+    for k in range(10):
         y = 66 + k * 52
         p.dark("20 %d 880 48" % y)
-        p.value("ZEILE %d" % (k + 1), "38 %d 850 48" % y, 28.0, L_CREAM)
+        p.value("ZEILE %d" % (k + 1), "38 %d 850 48" % y, 26.0, L_CREAM)
         p.button("TIPP %d" % (k + 1), "20 %d 880 48" % y)
-    p.key("ZURUECK", RED, "back", "920 66 340 90", 34.0)
-    p.key("LAUFWERKE", KEY_OFF, "drives", "920 164 340 90", 34.0)
-    p.key("SEITE ZURUECK", GREY, "pgup", "920 262 165 90", 30.0, L_DARK)
-    p.key("SEITE VOR", GREY, "pgdn", "1095 262 165 90", 30.0, L_DARK)
-    p.key("SPEICHERORT HIER", KEY_OFF, "savehere", "920 360 340 70", 26.0)
-    p.value("LISTINFO", "920 434 340 36", 24.0, L_MUTED, CENTRED)
+    p.key("ZURUECK", RED, "back", "920 66 340 90", 32.0)
+    p.key("LAUFWERKE", KEY_OFF, "drives", "920 164 340 90", 32.0)
+    p.key("SEITE ZURUECK", GREY, "pgup", "920 262 165 90", 28.0, L_DARK)
+    p.key("SEITE VOR", GREY, "pgdn", "1095 262 165 90", 28.0, L_DARK)
+    p.key("SPEICHERORT HIER", KEY_OFF, "savehere", "920 360 340 70", 24.0)
+    p.value("LISTINFO", "920 434 340 36", 22.0, L_MUTED, CENTRED)
     p.control("LISTE", "951 472 278 107")
-    p.caption("loaded", "20 584 150 40", 26.0, L_MUTED)
-    p.value("GELADEN", "170 584 1090 40", 28.0, L_RED)
+    p.caption("loaded", "20 584 150 40", 24.0, L_MUTED)
+    p.value("GELADEN", "170 584 1090 40", 26.0, L_RED)
 
 
-def setup(p):
-    p.key("LERNEN", RED, "learn", "20 20 400 140", 44.0)
-    p.value("LERNINFO", "20 175 400 50", 28.0, L_DARK)
-    for i in range(3):
-        p.caption("help%d" % (i + 1), "20 %d 400 36" % (240 + i * 36), 24.0, L_MUTED)
+def chop_print(p):
+    chop_header(p)
+    print_page(p, 252, True)
+
+
+def chop_setup(p):
+    p.key("LERNEN", RED, "learn", "20 20 400 140", 42.0)
+    p.value("LERNINFO", "20 175 400 50", 26.0, L_DARK)
+    for i in range(4):
+        p.caption("help%d" % (i + 1), "20 %d 400 34" % (238 + i * 34), 22.0, L_MUTED)
     rows = (("r1", "BELEGUNG"), ("r2", "LAUFWERKSLISTE"), ("r3", "SCHREIBEN"), ("r4", "LINKINFO"),
             ("r5", "ANALYSE"), ("r6", "SPEICHERORT"))
     for i, (key, param) in enumerate(rows):
         y = 20 + i * 70
         p.dark("450 %d 810 60" % y)
-        p.caption(key, "470 %d 220 60" % y, 26.0, L_CREAM_MUTED)
-        p.value(param, "690 %d 560 60" % y, 26.0, L_CREAM)
+        p.caption(key, "470 %d 220 60" % y, 24.0, L_CREAM_MUTED)
+        p.value(param, "690 %d 560 60" % y, 24.0, L_CREAM)
+
+
+# ------------------------------------------------------------------ GENRA BASS
+class BassPage(Page):
+    flashes = {"NEW": "BLITZ 1", "UNDO": "BLITZ 2", "PRINT": "BLITZ 3"}
+
+
+def bass_header(p, fields=True):
+    p.caption("genra", "20 8 120 48", 34.0, L_DARK)
+    p.caption("bass", "136 8 110 48", 34.0, L_RED)
+    if fields:
+        p.dark("250 9 560 46")
+        p.value("KOPFLINK", "262 9 540 46", 20.0, L_CREAM)
+        p.dark("820 9 440 46")
+        p.value("KOPFPRESET", "832 9 420 46", 20.0, L_CREAM)
+
+
+def bass_sound(p):
+    bass_header(p)
+    p.radio("ART", ("c808", "csub", "cupright", "cebass", "creese", "cacid"), [20 + i * 69 for i in range(6)],
+            66, 65, 40, 13.0)
+    lit = p.img.two(DARK, RED, 410, 52)
+    for r in range(6):
+        y = 116 + r * 58
+        p.film(lit, 2, "PRESETLICHT %d" % (r + 1), "20 %d 410 52" % y)
+        p.value("PRESETNAME %d" % (r + 1), "36 %d 390 52" % y, 21.0, L_CREAM)
+        p.button("PRESET %d" % (r + 1), "20 %d 410 52" % y)
+    groups = (("osc", ("WAVE", "SUB", "DETUNE", "NOISE")), ("filter", ("CUTOFF", "RESO", "ENV", "DRIVE")),
+              ("env", ("ATTACK", "DECAY", "SUSTAIN", "RELEASE")))
+    for gi, (cap, params) in enumerate(groups):
+        y = 66 + gi * 174
+        p.dark("450 %d 810 166" % y)
+        p.caption(cap, "466 %d 300 30" % (y + 6), 17.0, L_CREAM_MUTED)
+        for i, param in enumerate(params):
+            p.knob(param, 466 + i * 198, y + 54, 64, L_CREAM, L_CREAM_MUTED)
+    p.lcd("20 586 1240 32")
+    p.caption("hint", "32 586 1220 32", 16.0, L_LCD)
+
+
+def bass_main(p):
+    bass_header(p)
+    p.lcd("20 64 1240 200")
+    col = p.img.line_cols()
+    for s in range(64):
+        p.film(col, 34, "LINIE %d" % (s + 1), "%d 86 19 176" % (20 + int(round(s * 19.375))))
+    for b in range(4):
+        p.value("AKKORD %d" % (b + 1), "%d 64 300 22" % (30 + b * 310), 17.0, L_LCD)
+    p.key("NEW", RED, "new", "20 276 180 60", 26.0)
+    p.key("UNDO", GREY, "undo", "208 276 140 60", 22.0, L_DARK)
+    p.radio("AUTO PADS", ("auto", "padsmode"), (356, 470), 276, 110, 60, 20.0)
+    p.toggle("KEY LOCK", "keylock", "588 276 170 60", 20.0)
+    p.caption("rhythm", "780 270 200 22", 15.0, L_MUTED)
+    p.radio("RHYTHM", ("kick", "chop", "own"), (780, 870, 960), 294, 86, 42, 17.0)
+    p.caption("notes", "1056 270 200 22", 15.0, L_MUTED)
+    p.radio("NOTES", ("root", "chord", "free"), (1056, 1126, 1196), 294, 66, 42, 15.0)
+    p.dark("20 350 610 182")
+    p.caption("pattern", "36 354 300 28", 17.0, L_CREAM_MUTED)
+    p.dark("650 350 610 182")
+    p.caption("klang", "666 354 300 28", 17.0, L_CREAM_MUTED)
+    for i, param in enumerate(("DENSITY", "SWING", "GLIDE", "OCTAVE")):
+        p.knob(param, 76 + i * 150, 384, 64, L_CREAM, L_CREAM_MUTED, below=True)
+    for i, param in enumerate(("CUTOFF", "DRIVE", "DECAY", "LEVEL")):
+        p.knob(param, 706 + i * 150, 384, 64, L_CREAM, L_CREAM_MUTED, below=True)
+    p.lcd("20 544 1240 40")
+    p.value("STATUS", "32 544 1220 40", 18.0, L_LCD)
+
+
+def bass_print(p):
+    bass_header(p, False)
+    print_page(p, 252, False)
+
+
+def bass_setup(p):
+    bass_header(p, False)
+    rows = (("r1", "LINKINFO"), ("r2", "TONARTINFO"), ("r3", "PRINTORDNER"), ("r4", "VERSION"))
+    for i, (key, param) in enumerate(rows):
+        y = 80 + i * 70
+        p.dark("20 %d 1240 60" % y)
+        p.caption(key, "40 %d 260 60" % y, 24.0, L_CREAM_MUTED)
+        p.value(param, "300 %d 940 60" % y, 24.0, L_CREAM)
+
+
+# ------------------------------------------------------------------ SCHLAG
+SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LERNEN", "ORDNER HOCH", "LAUFWERKE", "SEITE ZURUECK", "SEITE VOR",
+                "HAUPTORDNER HIER"]
+DEAD_VOICES = {2: 3, 6: 4}  # CLAP and TOM: dying displays (value: the damage pattern)
+
+
+class SchlagPage(Page):
+    flashes = {k: "BLITZ %d" % (i + 1) for i, k in enumerate(SCHLAG_FLASH)}
+
+
+def schlag_header(p):
+    p.caption("schlag", "20 8 170 48", 34.0, L_RED)
+
+
+def schlag_main(p):
+    img = p.img
+    schlag_header(p)
+    p.lcd("196 9 370 46")
+    p.value("KOPFLINK", "208 9 350 46", 19.0, L_LCD)
+    p.radio("AUTO PADS", ("auto", "padsmode"), (576, 660), 9, 80, 46, 19.0)
+    p.key("UNDO", GREY, "undo", "746 9 120 46", 20.0, L_DARK)
+    p.key("BASIC", GREY, "basic", "872 9 120 46", 20.0, L_DARK)
+    p.key("NEW", RED, "new", "998 9 262 46", 24.0)
+    lamps, ring, small = img.lamps(), img.ring(72), img.knob(40)
+    pad = img.two(PAD, RED_LIT, 145, 62, 7)
+    for v in range(8):
+        x, w = 20 + v * 155, 145
+        dead = DEAD_VOICES.get(v, 0)
+        ink = L_DEAD if dead else L_LCD
+        p.dark("%d 66 %d 484" % (x, w))
+        p.caption("v%d" % (v + 1), "%d 72 110 28" % (x + 10), 17.0 if v == 5 else 20.0, L_CREAM)
+        p.film(lamps, 2, "LAMPE %d" % (v + 1), "%d 78 16 16" % (x + w - 22))
+        p.toggle("M %d" % (v + 1), "m", "%d 102 62 30" % (x + 8), 17.0)
+        p.toggle("S %d" % (v + 1), "s", "%d 102 62 30" % (x + 75), 17.0)
+        p.lcd("%d 140 129 30" % (x + 8), dead)
+        p.value("ORDNERTEXT %d" % (v + 1), "%d 140 119 30" % (x + 14), 14.0, ink)
+        p.lcd("%d 176 129 30" % (x + 8), dead and dead + 1)
+        p.value("SAMPLETEXT %d" % (v + 1), "%d 176 119 30" % (x + 14), 15.0, ink)
+        p.button("WAHL %d" % (v + 1), "%d 140 129 66" % (x + 8))
+        p.lcd("%d 212 129 24" % (x + 8), dead and dead + 2)
+        cells = img.drum_cells(bool(dead))
+        for j in range(16):
+            p.film(cells, 3, "ZELLE %d %d" % (v + 1, j + 1), "%d 215 6 18" % (x + 11 + int(round(j * 7.9))))
+        p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 244 72 72" % (x + 36), ring)
+        p.lcd("%d 322 89 26" % (x + 28), dead)
+        p.value("RANDOM %s" % VOICE_NAMES[v], "%d 322 89 26" % (x + 28), 16.0, ink, CENTRED)
+        for k in range(4):
+            cx, cy = x + 38 + (k % 2) * 69, (412 if k < 2 else 500)
+            fb = "%d %d 64 20" % (cx - 32, cy - 48)
+            p.lcd(fb, dead)
+            p.value("FUNKTION %d %d" % (v + 1, k + 1), fb, 11.0, ink, CENTRED)
+            p.button("FUNKTIONSWAHL %d %d" % (v + 1, k + 1), fb)
+            p.knob_only("WERT %d %d" % (v + 1, k + 1), "%d %d 40 40" % (cx - 20, cy - 22), small)
+            p.value("WERT %d %d" % (v + 1, k + 1), "%d %d 68 20" % (cx - 34, cy + 20), 13.0, L_CREAM_MUTED, CENTRED)
+        p.film(pad, 2, "PADLICHT %d" % (v + 1), "%d 558 145 62" % x)
+        p.caption("p%d" % (v + 1), "%d 560 40 24" % (x + 8), 15.0, L_PAD)
+        p.button("PAD %d" % (v + 1), "%d 558 145 62" % x)
+
+
+def schlag_folder(p):
+    schlag_header(p)
+    p.caption("ordner", "196 8 300 48", 28.0, L_MUTED)
+    p.radio("STIMME", ["v%d" % (i + 1) for i in range(8)], [20 + i * 155 for i in range(8)], 62, 145, 40, 16.0)
+    p.dark("20 110 600 46")
+    p.value("PFAD", "34 110 580 46", 20.0, L_CREAM)
+    for r in range(10):
+        y = 162 + r * 42
+        p.dark("20 %d 600 38" % y)
+        p.value("ZEILE %d" % (r + 1), "34 %d 580 38" % y, 19.0, L_CREAM)
+        p.button("TIPP %d" % (r + 1), "20 %d 600 38" % y)
+    p.key("SEITE ZURUECK", GREY, "pgup", "20 584 190 36", 18.0, L_DARK)
+    p.key("SEITE VOR", GREY, "pgdn", "216 584 190 36", 18.0, L_DARK)
+    p.key("ORDNER HOCH", KEY_OFF, "back", "412 584 208 36", 18.0)
+    p.dark("640 110 620 250")
+    p.value("STIMMINFO", "660 118 580 40", 24.0, L_CREAM)
+    p.value("STIMMORDNER", "660 166 580 36", 19.0, L_CREAM_MUTED)
+    p.value("STIMMSAMPLE", "660 206 580 36", 19.0, L_CREAM_MUTED)
+    p.value("STIMMANZAHL", "660 246 580 36", 19.0, L_CREAM_MUTED)
+    p.caption("hint1", "660 290 580 30", 17.0, L_CREAM_MUTED)
+    p.caption("hint2", "660 318 580 30", 17.0, L_CREAM_MUTED)
+    p.key("LAUFWERKE", KEY_OFF, "drives", "640 372 300 60", 22.0)
+    p.key("HAUPTORDNER HIER", RED, "root", "950 372 310 60", 18.0)
+    p.value("LISTINFO", "640 440 620 30", 18.0, L_MUTED, CENTRED)
+    p.control("LISTE", "811 474 278 107")
+
+
+def schlag_print(p):
+    schlag_header(p)
+    print_page(p, 196, False)
+
+
+def schlag_setup(p):
+    schlag_header(p)
+    p.caption("setup", "196 8 300 48", 28.0, L_MUTED)
+    p.key("LERNEN", RED, "learn", "20 70 400 130", 40.0)
+    p.value("LERNINFO", "20 210 400 44", 24.0, L_DARK)
+    for i in range(4):
+        p.caption("help%d" % (i + 1), "20 %d 400 32" % (262 + i * 32), 20.0, L_MUTED)
+    p.toggle("HAT CHOKE", "choke", "20 410 400 70", 24.0)
+    rows = (("r1", "BELEGUNG"), ("r2", "HAUPTORDNER"), ("r3", "LINKINFO"), ("r4", "SPEICHERINFO"), ("r5", "VERSION"))
+    for i, (key, param) in enumerate(rows):
+        y = 70 + i * 70
+        p.dark("450 %d 810 60" % y)
+        p.caption(key, "470 %d 220 60" % y, 22.0, L_CREAM_MUTED)
+        p.value(param, "690 %d 560 60" % y, 22.0, L_CREAM)
+
+
+# ------------------------------------------------------------------ main
+def qmap(assign):
+    return G.Obj(("Q-Link %d" % q, assign.get(q, -1)) for q in range(1, 17))
+
+
+def tabmap(n, assigns):
+    return [G.obj(("Tab", t + 1), ("SubTab", 1), ("Bank Direction", "Row"), ("Q-Links", qmap(assigns.get(t, {}))))
+            for t in range(n)]
 
 
 def main():
@@ -371,6 +704,8 @@ def main():
         print(__doc__)
         return 2
     project = sys.argv[1]
+    with open(os.path.join(project, "plugin.json"), encoding="utf-8") as f:
+        plugin = json.load(f)["name"]
     build = os.path.join(project, "build")
     outs = [os.path.join(build, d, "Plugin Skins") for d in sorted(os.listdir(build))
             if os.path.isdir(os.path.join(build, d, "Plugin Skins"))]
@@ -384,40 +719,62 @@ def main():
 
     params = G.load_params(os.path.join(build, "params.json"))
     h = {q.name: q.handle for q in params}
+    idx = {q.name: q.index for q in params}
     table = G.ParamTable(params)
     ui_pages, style, knob_image, frames, kit = G.load_ui(os.path.join(project, "ui.json"), table)
     tui = G.build_tui(ui_pages, params, style, knob_image, frames, {})
     defs = {c.param.name: c.definition for pg in ui_pages for c in pg.controls if c.param is not None}
-
     page_data = dict(tui)["pageData"]
     tabs = dict(page_data)["tabs"]
     del tabs[:]
     img = Images(out_dir)
-    pages = (("BROWSER", browser, ["941 464 298 123"]), ("CHOP", chop_page, ["596 502 664 76"]), ("SETUP", setup, []))
+
+    if plugin == "GENRA CHOP":
+        cls = ChopPage
+        pages = (("BROWSER", chop_browser, ["941 464 298 123"]), ("CHOP", chop_page, ["596 502 664 76"]),
+                 ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
+        choices = {"BANK": ["A", "B", "C", "D"], "ANSICHT": ["Sample", "Loop", "Chop"],
+                   "MODUS": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"]}
+        screen = tabmap(4, {0: {13: idx["LISTE"]},
+                            1: {1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
+                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]}})
+        program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
+    elif plugin == "GENRA BASS":
+        cls = BassPage
+        pages = (("SOUND", bass_sound, ["450 66 810 166", "450 240 810 166", "450 414 810 166"]),
+                 ("BASS", bass_main, ["20 350 610 182", "650 350 610 182"]),
+                 ("PRINT", bass_print, []), ("SETUP", bass_setup, []))
+        choices = {"ART": ["808", "SUB", "UPRIGHT", "E-BASS", "REESE", "ACID"], "AUTO PADS": ["Auto", "Pads"],
+                   "RHYTHM": ["Kick", "Chop", "Eigen"], "NOTES": ["Root", "Akkord", "Frei"]}
+        sound = ["WAVE", "SUB", "DETUNE", "NOISE", "CUTOFF", "RESO", "ENV", "DRIVE", "ATTACK", "DECAY", "SUSTAIN", "RELEASE"]
+        screen = tabmap(4, {0: {i + 1: idx[n] for i, n in enumerate(sound)},
+                            1: {1: idx["DENSITY"], 2: idx["SWING"], 3: idx["GLIDE"], 4: idx["OCTAVE"],
+                                5: idx["CUTOFF"], 6: idx["DRIVE"], 7: idx["DECAY"], 8: idx["LEVEL"]}})
+        program = qmap({i + 1: idx[n] for i, n in enumerate(sound)})
+    elif plugin == "SCHLAG":
+        cls = SchlagPage
+        pages = (("SCHLAG", schlag_main, []), ("ORDNER", schlag_folder, ["801 466 298 123"]),
+                 ("PRINT", schlag_print, []), ("SETUP", schlag_setup, []))
+        choices = {"AUTO PADS": ["Auto", "Pads"], "STIMME": VOICE_NAMES}
+        q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
+        q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
+        screen = tabmap(4, {0: q, 1: {13: idx["LISTE"]}})
+        program = qmap(q)
+    else:
+        print("build_skin: unknown plugin %s" % plugin)
+        return 1
+
     for i, (name, fn, ql) in enumerate(pages):
-        pg = Page(h, style, defs, img)
+        pg = cls(h, style, defs, img)
         fn(pg)
         tabs.append(pg.tab(name, i, ql))
-
-    # the choice parameters step through their names on the data wheel
-    styles = [q for q in params if q.name == "STYLE"]
     for k, v in page_data:
         if k == "replacementStrings":
-            v.append(G.obj(("key", h["BANK"]), ("value", ["A", "B", "C", "D"])))
-            v.append(G.obj(("key", h["ANSICHT"]), ("value", ["Sample", "Loop", "Chop"])))
-            v.append(G.obj(("key", h["MODUS"]), ("value", ["Transient", "Equal"])))
-            if styles and getattr(styles[0], "choices", None):
-                v.append(G.obj(("key", h["STYLE"]), ("value", list(styles[0].choices))))
-
-    def qmap(assign):
-        return G.Obj(("Q-Link %d" % q, assign.get(q, -1)) for q in range(1, 17))
-    idx = {q.name: q.index for q in params}
-    screen = [G.obj(("Tab", 1), ("SubTab", 1), ("Bank Direction", "Row"), ("Q-Links", qmap({13: idx["LISTE"]}))),
-              G.obj(("Tab", 2), ("SubTab", 1), ("Bank Direction", "Row"),
-                    ("Q-Links", qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
-                                      5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]}))),
-              G.obj(("Tab", 3), ("SubTab", 1), ("Bank Direction", "Row"), ("Q-Links", qmap({})))]
-    program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
+            for param, names in choices.items():
+                v.append(G.obj(("key", h[param]), ("value", names)))
+            style_p = [q for q in params if q.name == "STYLE"]
+            if style_p and style_p[0].choices:
+                v.append(G.obj(("key", h["STYLE"]), ("value", list(style_p[0].choices))))
     qlinks = G.obj(("version", 4), ("info", G.obj(("version", 1), ("type", "CompleteDescription"))),
                    ("Screen Mode Q-Links", G.obj(("version", 4), ("map", screen))),
                    ("Program Mode Q-Links", program))
@@ -431,7 +788,7 @@ def main():
         f.write(G.dump_json(tui) + "\n")
     with open(os.path.join(out_dir, "Q-Links.json"), "w", encoding="utf-8", newline="\n") as f:
         f.write(G.dump_json(qlinks) + "\n")
-    print("build_skin: wrote BROWSER, CHOP, SETUP (%d images) to %s" % (len(img.done), out_dir))
+    print("build_skin: %s: wrote %s (%d images)" % (plugin, ", ".join(n for n, _, _ in pages), len(img.done)))
     return 0
 
 

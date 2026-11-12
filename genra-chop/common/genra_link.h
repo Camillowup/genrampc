@@ -1,17 +1,22 @@
-// genra_link.h - LINK v2: the shared memory between GENRA CHOP (the chef) and its companion plugins
-// (GENRA BASS today; drums, melody and pads later), each on its own MPC track.
+// genra_link.h - LINK v3: the shared memory between GENRA CHOP (the chef) and its companions
+// (GENRA BASS, SCHLAG; melody and pads later), each on its own MPC track.
 //
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // All plugins run inside the MPC application and meet in one small file mapped into memory (mmap, MAP_SHARED):
-// /dev/shm/genra-link-v2, or /tmp/genra-link-v2. Only open/ftruncate/mmap from libc are used (no librt).
+// /dev/shm/genra-link-v3, or /tmp/genra-link-v3. Only open/ftruncate/mmap from libc are used (no librt).
 //
-// GENRA CHOP writes the key, the chords, the style and the rendered loop (4 bars of 16 steps) of every track.
-// The loop is written by GENRA CHOP's worker thread under a sequence counter (seqlock); readers copy it in a
-// non-audio thread and hand it to their audio thread. Everything else is a lock-free atomic.
+// GENRA CHOP writes the key, the chords, the style and the rendered loop (4 bars of 16 steps) of every track:
+// tone tracks as notes (pitch, length, velocity, accent, slide, priority), the drums as hits per voice
+// (velocity, timing, ratchets, chance, every-2nd), the chop track as a step mask. The loop is written by GENRA CHOP's
+// worker under a sequence counter (seqlock); companions copy it in a non-audio thread. Everything else is atomic.
 //
-// A companion has a slot per role (LANE_DRUMS .. LANE_PADS): it beats there (alive), writes its preset name and
-// bumps newRequest when its own NEW is pressed; GENRA CHOP then rolls that track again.
+// A companion has a slot per role (LANE_DRUMS .. LANE_PADS): it beats there (alive), writes its sound's name and
+// bumps newRequest / undoRequest when its own NEW / UNDO is pressed; GENRA CHOP then rolls that track again or
+// brings its last one back.
+//
+// v3 (GENRA CHOP 0.2): drums complete, note priority, chop mask, undo requests. Every plugin of the set must speak
+// the same version: they are updated together.
 //
 // Open the link from the constructor / prepare() / a worker, never from process().
 
@@ -32,11 +37,12 @@
 
 namespace genralink {
 
-static const uint32_t kMagic = 0x474E4C32u; // "GNL2"
-static const uint32_t kVersion = 2;
+static const uint32_t kMagic = 0x474E4C33u; // "GNL3"
+static const uint32_t kVersion = 3;
 static const int kChops = 64;
 static const int kSteps = 64;   // 4 bars of 16
 static const int kBars = 4;
+static const int kDrums = 8;    // GENRA order: kick, snare, clap, rim, closed hat, open hat, tom, perc
 enum Lane { LANE_DRUMS = 0, LANE_BASS, LANE_MEL, LANE_PADS, NUM_LANES };
 
 // one note of a tone track (bass, melody), one step
@@ -46,6 +52,19 @@ struct StepNote
     uint8_t len16;  // length in 16ths of a step (16 = one step)
     uint8_t vel;    // 1..127
     uint8_t flags;  // 1 accent, 2 slide
+    uint8_t prio;   // 0..255: DENSITY keeps a note while prio <= density
+    int8_t  off;    // timing, in 1/100 of a step
+};
+
+// one drum hit, one voice, one step
+struct DrumHit
+{
+    uint8_t vel;     // 0: none
+    int8_t  off;     // timing, in 1/100 of a step (-45 .. 45)
+    uint8_t ratchet; // hits in the step
+    uint8_t chance;  // 0..255 (255 = always)
+    uint8_t cond;    // 1: only every 2nd time round
+    uint8_t prio;
 };
 
 // the loop, copied as a whole under the seqlock
@@ -53,20 +72,23 @@ struct Loop
 {
     StepNote bass[kSteps];
     StepNote mel[kSteps];
-    int8_t   pad[kSteps][4];   // pad chord voices, -1: none (new chord starts here)
+    int8_t   pad[kSteps][4];   // pad chord voices, -1: none (a new chord starts here)
     uint8_t  padLen[kSteps];   // in steps
-    uint8_t  drums[kSteps];    // bit per drum voice (GENRA order: kick, snare, clap, rim, ch, oh, tom, perc)
+    DrumHit  drum[kDrums][kSteps];
+    uint8_t  chop[kSteps];     // 1: a chop starts on this step (bass RHYTHM = Chop)
     int8_t   barRoot[kBars], barQuality[kBars];
     uint16_t swingX1000;       // 500 = straight
     int16_t  style;
+    uint32_t id;               // +1 for every new loop (NEW ALL); the same loop keeps its id
 };
 
 struct Companion
 {
     std::atomic<uint32_t> beat;        // +1 every audio block: this companion is alive
     std::atomic<uint32_t> newRequest;  // +1 when its own NEW was pressed
+    std::atomic<uint32_t> undoRequest; // +1 when its own UNDO was pressed
     std::atomic<uint32_t> nameSeq;     // seqlock for name
-    char name[24];                     // its preset / sound ("Upright")
+    char name[24];                     // its sound ("Warm Upright")
 };
 
 struct LinkData
@@ -84,7 +106,7 @@ struct LinkData
     std::atomic<int32_t>  step;            // 0..63 while the MPC plays, -1 stopped
     std::atomic<int8_t>   chordRoot[kChops];   // per chop: 0..11, -1 = no chord (a hit)
     std::atomic<int8_t>   chordQuality[kChops];
-    std::atomic<uint32_t> loopSeq;         // seqlock for loop: odd while writing; changes = a new loop
+    std::atomic<uint32_t> loopSeq;         // seqlock for loop: odd while writing
     Loop                  loop;
     // written by the companions
     Companion             lane[NUM_LANES];
@@ -104,7 +126,7 @@ public:
         return false;
 #else
         if (data_) return true;
-        const char* candidates[] = {"/dev/shm/genra-link-v2", "/tmp/genra-link-v2"};
+        const char* candidates[] = {"/dev/shm/genra-link-v3", "/tmp/genra-link-v3"};
         for (const char* p : candidates)
         {
             int fd = ::open(p, O_RDWR | O_CREAT, 0666);
@@ -125,8 +147,7 @@ public:
                 data_->lastChop.store(-1);
                 data_->step.store(-1);
                 for (int i = 0; i < kChops; ++i) { data_->chordRoot[i].store(-1); data_->chordQuality[i].store(-1); }
-                std::memset(&data_->loop, 0xff, sizeof(Loop)); // all notes -1
-                data_->loop.swingX1000 = 500;
+                clearLoop(data_->loop);
                 data_->version.store(kVersion);
                 data_->magic.store(kMagic);
             }
@@ -134,6 +155,18 @@ public:
         }
         return false;
 #endif
+    }
+
+    static void clearLoop(Loop& l)
+    {
+        std::memset(&l, 0, sizeof(Loop));
+        for (int s = 0; s < kSteps; ++s)
+        {
+            l.bass[s].pitch = l.mel[s].pitch = -1;
+            for (int v = 0; v < 4; ++v) l.pad[s][v] = -1;
+        }
+        for (int b = 0; b < kBars; ++b) { l.barRoot[b] = -1; l.barQuality[b] = -1; }
+        l.swingX1000 = 500;
     }
 
     void close()
@@ -156,7 +189,7 @@ public:
         std::memcpy(&data_->loop, &l, sizeof(Loop));
         data_->loopSeq.fetch_add(1, std::memory_order_acq_rel); // even
     }
-    // a companion's non-audio thread: copy the loop; false if none could be read (being written, or none yet)
+    // a companion's non-audio thread: copy the loop; false if none could be read
     bool readLoop(Loop& out, uint32_t& seq) const
     {
         if (!data_) return false;
@@ -191,6 +224,19 @@ public:
         }
         return std::string();
     }
+
+    // is GENRA CHOP alive? (a non-audio thread asks every few hundred ms)
+    struct Alive
+    {
+        uint32_t last = 0;
+        bool ever = false;
+        long long seenMs = 0;
+        bool check(uint32_t beat, long long nowMs)
+        {
+            if (beat != last) { last = beat; seenMs = nowMs; ever = true; }
+            return ever && nowMs - seenMs < 1500;
+        }
+    };
 
 private:
     LinkData* data_ = nullptr;

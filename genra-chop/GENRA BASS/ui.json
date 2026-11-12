@@ -1,19 +1,19 @@
 {
+  "style": {
+    "background": "ffd9d3c3",
+    "text": "ff2a2926",
+    "muted": "ff5a5850",
+    "accent": "ffc0322b"
+  },
   "pages": [
-    { "name": "BASS",
+    {
+      "name": "KNOBS",
       "controls": [
-        { "param": "SOUND", "widget": "switch" },
-        { "param": "TONE", "widget": "knob" },
-        { "param": "DECAY", "widget": "knob" },
-        { "param": "GLIDE", "widget": "knob" },
-        { "param": "FOLLOW", "widget": "switch" },
-        { "param": "OCT", "widget": "knob", "polarity": "bipolar" },
-        { "param": "KEY LOCK", "widget": "switch" },
-        { "param": "NEW", "widget": "switch" },
-        { "param": "VOLUME", "widget": "knob" },
-        { "param": "STATUS", "widget": "slider" },
-        { "param": "INFO", "widget": "slider" },
-        "empty"
-      ] }
+        {
+          "param": "LEVEL",
+          "widget": "slider"
+        }
+      ]
+    }
   ]
 }
