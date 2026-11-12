@@ -3,21 +3,23 @@
 Plugins for Akai MPC standalone hardware (MPC OS 3.10.1 or later), built with Akai's
 [MPC Plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk). Brand: **Genra**.
 
-The first goal is **GENRA CHOP** on the MPC: the sample chopper from the VCV Rack plugin
-[GENRA CHOP](https://github.com/Camillowup/genra-chop), plus companion plugins on other tracks that follow it
-(key, chords, patterns). Before that, a small test checks that everything the plan needs works on the device.
+**GENRA** is a generative hip-hop beat machine: load a sample, GENRA chops it, finds its key and chords and rolls a
+whole loop around it (drums, bass, melody, pads) in 29 styles from the 80s to the 2020s. On the MPC it is five
+plugins, one per track: **GENRA CHOP** (the sample chopper from the VCV Rack plugin
+[GENRA CHOP](https://github.com/Camillowup/genra-chop), the chef) and the companions **GENRA BASS**, **SCHLAG**
+(drums), **GENRA MELODY** and **GENRA PADS**, which follow it (key, chords, patterns) and can be played on the pads.
 
 | Folder | What |
 |---|---|
 | `chop-test/` | **Archive** (no longer built): the mini test `CHOP TEST` (load a WAV from the SSD, chop it with the GENRA CHOP engine, play the chops on the pads) and `CHOP LINK` (a second plugin on another track that follows CHOP TEST). See [chop-test/README.md](chop-test/README.md). |
-| `genra-chop/` | **GENRA CHOP 0.2** (the chopper and chef: loops in 29 styles on the MPC's transport), **GENRA BASS 0.2** (bass companion) and **SCHLAG 0.1** (8-voice drum random sampler), linked over LINK v3. See [genra-chop/README.md](genra-chop/README.md). Artifact **genra-mpc**. |
+| `genra-chop/` | **GENRA CHOP 0.3** (the chopper and chef: loops in 29 styles on the MPC's transport), **GENRA BASS 0.3** (bass), **SCHLAG 0.2** (8-voice drum random sampler), **GENRA MELODY 0.1** (melody) and **GENRA PADS 0.1** (chords, also on the 16 pads), linked over LINK v3, each in the colours of a limited-edition MPC. See [genra-chop/README.md](genra-chop/README.md). Artifact **genra-mpc**. |
 | `sdk/` | A copy of Akai's MPC Plugin SDK (MIT). One change: `tools/build.py` links `-lpthread` (our plugins run a worker thread). |
 
 ## Install on the MPC
 
 1. On the MPC: **Preferences → Enhancements (Beta)**: turn on **Enable Enhancements** and **External Plugin Support** (MPC OS 3.10.1 or later).
 2. Here on GitHub: **Actions** → the latest successful run → artifact **genra-mpc**. Unzip it.
-3. Inside is a folder `VST2 Plugins` with the plugin folders (`Genra - VST - GENRA CHOP`, `Genra - VST - GENRA BASS`, `Genra - VST - SCHLAG`).
+3. Inside is a folder `VST2 Plugins` with the plugin folders (`Genra - VST - GENRA CHOP`, `Genra - VST - GENRA BASS`, `Genra - VST - SCHLAG`, `Genra - VST - GENRA MELODY`, `Genra - VST - GENRA PADS`).
    Copy those plugin folders into the folder `VST2 Plugins` at the root of the MPC's drive (internal SSD recommended;
    create `VST2 Plugins` if it is not there). Do not rename them.
 4. Restart the MPC. The plugins are listed under **External Plugins**.
@@ -30,7 +32,7 @@ Python 3.9+; the build fetches the zig cross compiler on first use:
 
 ```
 python sdk/tools/build.py "genra-chop/GENRA CHOP"
-python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"   # same for "GENRA BASS" and "SCHLAG"
+python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"   # same for "GENRA BASS", "SCHLAG", "GENRA MELODY", "GENRA PADS"
 ```
 
 The finished folders are in `genra-chop/<plugin>/build/Genra - VST - <plugin>/`.

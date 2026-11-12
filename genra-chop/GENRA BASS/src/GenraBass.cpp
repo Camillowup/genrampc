@@ -4,23 +4,24 @@
 //
 // Pages (genra-chop/tools/build_skin.py), on the function keys:
 //   SOUND  (opens first) the bass kinds 808 / SUB / UPRIGHT / E-BASS / REESE / ACID, their presets to tap, and the
-//          sound: OSZILLATOR (WAVE, SUB, DETUNE, NOISE), FILTER (CUTOFF, RESO, ENV, DRIVE),
-//          HUELLKURVE (ATTACK, DECAY, SUSTAIN, RELEASE): one Q-Link row each
+//          sound: OSC (WAVE, SUB, DETUNE, NOISE), FILTER (CUTOFF, RESO, ENV, DRIVE),
+//          ENVELOPE (ATTACK, DECAY, SUSTAIN, RELEASE): one Q-Link row each
 //   BASS   the bass line of the loop with GENRA CHOP's chords, NEW, UNDO, AUTO | PADS, KEY LOCK, RHYTHM
-//          (Kick / Chop / Eigen), NOTES (Root / Akkord / Frei), PATTERN (DENSITY, SWING, GLIDE, OCTAVE),
-//          KLANG (CUTOFF, DRIVE, DECAY, LEVEL)
+//          (Kick / Chop / Own), NOTES (Root / Chord / Free), PATTERN (DENSITY, SWING, GLIDE, OCTAVE),
+//          TONE (CUTOFF, DRIVE, DECAY, LEVEL)
 //   PRINT  the bass line as a MIDI file; afterwards PADS
 //   SETUP  the status
 //
 // The line comes from GENRA CHOP over LINK v3 (common/genra_link.h): the engine's bass, which this plugin shapes:
-// RHYTHM Kick puts the notes on GENRA CHOP's kicks, Chop on its chops, Eigen keeps the engine's rhythm; NOTES Root
-// plays the bar's root, Akkord pulls every note onto a chord tone, Frei keeps the line; DENSITY thins it out.
+// RHYTHM Kick puts the notes on GENRA CHOP's kicks, Chop on its chops, Own keeps the engine's rhythm; NOTES Root
+// plays the bar's root, Chord pulls every note onto a chord tone, Free keeps the line; DENSITY thins it out.
 // AUTO plays it on the MPC's transport; PADS plays only the notes of this track. KEY LOCK pulls the notes of this
 // track into GENRA CHOP's key. NEW / UNDO ask GENRA CHOP for a new bass line / the last one.
 //
 // Sound: one voice: WAVE Saw / Square / Sine / 808 (sine that falls into the note) / Pluck (a plucked string,
 // Karplus-Strong) / Reese (two detuned saws), SUB (sine an octave down), DETUNE (a second oscillator), NOISE
-// (the attack's click / thump) -> low-pass (SVF: CUTOFF, RESO, ENV) -> DRIVE -> ADSR -> LEVEL.
+// (the attack's click / thump) -> low-pass (SVF: CUTOFF, RESO, ENV) -> DRIVE -> ADSR -> LEVEL, lifted when the
+// filter is closed (up to +9 dB) -> soft limiter.
 // Threads: process() (audio); a worker copies the loop out of the shared memory, builds the line and the screen.
 
 #include "mpc_plugin.h"
@@ -95,14 +96,14 @@ const Preset kPresets[kCats][kPresetRows] = {
 };
 
 static const char* const kCaptions[][2] = {
-    {"genra", "GENRA"}, {"bass", "BASS"}, {"new", "NEW"}, {"undo", "UNDO"}, {"auto", "AUTO"}, {"padsmode", "PADS"},
-    {"keylock", "KEY LOCK"}, {"rhythm", "RHYTHM"}, {"kick", "Kick"}, {"chop", "Chop"}, {"own", "Eigen"},
-    {"notes", "NOTES"}, {"root", "Root"}, {"chord", "Akkord"}, {"free", "Frei"}, {"pattern", "PATTERN"},
-    {"klang", "KLANG"}, {"osc", "OSZILLATOR"}, {"filter", "FILTER"}, {"env", "HUELLKURVE"},
-    {"c808", "808"}, {"csub", "SUB"}, {"cupright", "UPRIGHT"}, {"cebass", "E-BASS"}, {"creese", "REESE"},
-    {"cacid", "ACID"}, {"hint", "Doppeltipp = Regler gross · Q-Links: eine Reihe pro Bank"},
-    {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "Nach PRINT"}, {"autoinfo", "AUTO: der Loop spielt"},
-    {"padsinfo", "PADS: nur die Noten der MPC-Spur"}, {"r1", "LINK"}, {"r2", "Tonart"}, {"r3", "Print-Ordner"},
+    {"genra", "GENRA"}, {"name", "BASS"}, {"new", "NEW"}, {"undo", "UNDO"}, {"auto", "AUTO"}, {"padsmode", "PADS"},
+    {"keylock", "KEY LOCK"}, {"rhythm", "RHYTHM"}, {"rh1", "KICK"}, {"rh2", "CHOP"}, {"rh3", "OWN"},
+    {"notes", "NOTES"}, {"no1", "ROOT"}, {"no2", "CHORD"}, {"no3", "FREE"}, {"pattern", "PATTERN"},
+    {"tone", "TONE"}, {"osc", "OSC"}, {"filter", "FILTER"}, {"env", "ENVELOPE"},
+    {"cat1", "808"}, {"cat2", "SUB"}, {"cat3", "UPRIGHT"}, {"cat4", "E-BASS"}, {"cat5", "REESE"},
+    {"cat6", "ACID"}, {"hint", "Tap a preset to load · double tap = big knob"},
+    {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
+    {"padsinfo", "PADS: only the MPC track's notes"}, {"r1", "LINK"}, {"r2", "Key"}, {"r3", "Print folder"},
     {"r4", "Version"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
@@ -152,11 +153,11 @@ public:
         addParam(floatParam("glide", "GLIDE", 0.f, 100.f, 0.f, "", 0));
         addParam(intParam("oct", "OCTAVE", -2, 2, 0));
         addParam(floatParam("level", "LEVEL", -40.f, 6.f, -6.f, "dB", 1));
-        addParam(choiceParam("cat", "ART", {kCatNames[0], kCatNames[1], kCatNames[2], kCatNames[3], kCatNames[4], kCatNames[5]}, 2));
+        addParam(choiceParam("cat", "KIND", {kCatNames[0], kCatNames[1], kCatNames[2], kCatNames[3], kCatNames[4], kCatNames[5]}, 2));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
         addParam(boolParam("keylock", "KEY LOCK", true));
-        addParam(choiceParam("rhythm", "RHYTHM", {"Kick", "Chop", "Eigen"}, 2));
-        addParam(choiceParam("notes", "NOTES", {"Root", "Akkord", "Frei"}, 2));
+        addParam(choiceParam("rhythm", "RHYTHM", {"Kick", "Chop", "Own"}, 2));
+        addParam(choiceParam("notes", "NOTES", {"Root", "Chord", "Free"}, 2));
         addButton("NEW");
         addButton("UNDO");
         addButton("PRINT");
@@ -183,7 +184,7 @@ public:
         screen_.button(P_PRINT, P_FLASH0 + 2);
         screen_.watch(P_CAT);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA BASS 0.2 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA BASS 0.3 · LINK v3");
     }
 
     ~GenraBass() override
@@ -198,7 +199,7 @@ public:
         i.name = "GENRA BASS";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'B', 's');
-        i.version = 200;
+        i.version = 300;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -280,9 +281,11 @@ public:
             curStep_.store(playing ? curStepOf(tr) : -1, std::memory_order_relaxed);
         }
 
-        float target = std::pow(10.f, get(P_LEVEL) / 20.f);
-        if (gainSmooth_ < 0.f) gainSmooth_ = target;
         const float cutoff = get(P_CUTOFF) / 100.f, reso = get(P_RESO) / 100.f, envAmt = get(P_ENV) / 100.f;
+        // level compensation: the more the low-pass is closed, the more it is lifted (up to +9 dB)
+        const float comp = std::pow(10.f, 9.f * std::pow(1.f - cutoff, 1.5f) / 20.f);
+        float target = std::pow(10.f, get(P_LEVEL) / 20.f) * comp;
+        if (gainSmooth_ < 0.f) gainSmooth_ = target;
         const float drive = 1.f + 5.f * get(P_DRIVE) / 100.f;
         const float att = 0.0005f + 0.5f * std::pow(get(P_ATTACK) / 100.f, 2.f);
         const float dec = 0.04f + 2.5f * std::pow(get(P_DECAY) / 100.f, 2.f);
@@ -361,6 +364,7 @@ public:
             float y = filt_.process(raw, mpc::dsp::SVF::Mode::Lowpass);
             y = std::tanh(y * drive) / driveNorm;
             y *= env_ * vel_ * gainSmooth_ * 0.8f;
+            y = std::tanh(y * 1.1f) / 1.1f; // soft limiter
             outL[i] = y;
             if (outR) outR[i] = y;
         }
@@ -397,7 +401,7 @@ public:
             case P_RELEASE: std::snprintf(b, sizeof b, "%.0f ms", (0.01f + 1.5f * std::pow(plain / 100.f, 2.f)) * 1000.f); out = b; return true;
             case P_GLIDE: std::snprintf(b, sizeof b, "%.0f ms", (0.004f + 0.3f * plain / 100.f) * 1000.f); out = b; return true;
             case P_SWING:
-                if (std::fabs(plain) < 0.5f) out = "vom Chop";
+                if (std::fabs(plain) < 0.5f) out = "from chop";
                 else { std::snprintf(b, sizeof b, "%+.0f %%", plain); out = b; }
                 return true;
             case P_OCT: std::snprintf(b, sizeof b, "%+d", (int)std::lround(plain)); out = b; return true;
@@ -611,13 +615,13 @@ private:
         int bpm100 = L ? L->bpmX100.load() : 0;
         char b[64];
         if (alive) std::snprintf(b, sizeof b, "LINK GENRA CHOP · %s · %.0f BPM", key.c_str(), bpm100 / 100.0);
-        else std::snprintf(b, sizeof b, "kein GENRA CHOP");
+        else std::snprintf(b, sizeof b, "no GENRA CHOP");
         screen_.setText(P_HDRLINK, b);
         int cat = clamp(getInt(P_CAT), 0, kCats - 1), row = presetRow_.load();
         bool inCat = row >= 0 && row < kPresetRows && presetCat_ == cat;
-        std::string pname = row >= 0 && row < kPresetRows ? kPresets[presetCat_][row].name : std::string("eigener Klang");
+        std::string pname = row >= 0 && row < kPresetRows ? kPresets[presetCat_][row].name : std::string("own sound");
         if (edited_) pname += " *";
-        screen_.setText(P_HDRPRESET, "Preset: " + pname);
+        screen_.setText(P_HDRPRESET, std::string(kCatNames[presetCat_]) + " · " + pname);
         for (int r = 0; r < kPresetRows; ++r)
         {
             bool sel = inCat && r == row;
@@ -625,27 +629,27 @@ private:
             screen_.setFrame(P_PRESETLIT0 + r, sel ? 1 : 0);
         }
         for (int bar = 0; bar < genralink::kBars; ++bar) screen_.setText(P_CHORD0 + bar, chordName(loop_.barRoot[bar], loop_.barQuality[bar]));
-        const char* rh[3] = {"Bass folgt dem Kick", "Bass folgt den Chops", "Rhythmus der Engine"};
+        const char* rh[3] = {"bass on the kick", "bass on the chops", "the engine's rhythm"};
         const int rhythm = clamp(getInt(P_RHYTHM), 0, 2);
         int step = curStep_.load();
         if (step >= 0)
         {
             int bar = step / 16;
-            std::snprintf(b, sizeof b, "Takt %d · %s · %s", bar + 1, chordName(loop_.barRoot[bar], loop_.barQuality[bar]).c_str(), rh[rhythm]);
+            std::snprintf(b, sizeof b, "Bar %d · %s · %s", bar + 1, chordName(loop_.barRoot[bar], loop_.barQuality[bar]).c_str(), rh[rhythm]);
             screen_.setText(P_STATUS, b);
         }
         else screen_.setText(P_STATUS, std::string(getInt(P_AUTO) == 0 ? "AUTO · " : "PADS · ") + rh[rhythm]);
-        std::snprintf(b, sizeof b, "Basslinie · 4 Takte · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
+        std::snprintf(b, sizeof b, "Bass line · 4 bars · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: der Loop spielt" : "PADS: nur die Noten der MPC-Spur");
-        screen_.setText(P_LINKINFO, !L ? "Fehler: " + link_.error() : (alive ? std::string("GENRA CHOP verbunden") : std::string("kein GENRA CHOP")));
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
+        screen_.setText(P_LINKINFO, !L ? "Error: " + link_.error() : (alive ? std::string("GENRA CHOP linked") : std::string("no GENRA CHOP")));
         screen_.setText(P_KEYINFO, key);
     }
 
     void printList()
     {
         std::string dir = printDir(std::string());
-        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("kein Ordner") : pathLabel(dir), true);
+        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("no folder") : pathLabel(dir), true);
         std::vector<std::string> list = dir.empty() ? std::vector<std::string>() : listPrints(dir);
         for (int r = 0; r < kPrintRows; ++r)
             screen_.setText(P_PRINTROW0 + r, r < (int)list.size() ? (r == 0 ? "> " : "") + list[(size_t)r].substr(0, list[(size_t)r].size() - 4) : std::string());
@@ -674,7 +678,7 @@ private:
     void print(genralink::LinkData* L)
     {
         std::string dir = printDir(std::string());
-        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "kein Ordner zum Schreiben"); return; }
+        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "no folder to write to"); return; }
         const int oct = getInt(P_OCT);
         const float swing = clampf(shown_.swing + get(P_SWING) / 100.f, 0.5f, 0.75f);
         std::vector<MidiNote> notes;
@@ -695,9 +699,9 @@ private:
         {
             set(P_AUTO, 1.f);
             notifyHostParameterChanged(P_AUTO);
-            screen_.message(P_PRINTSTATUS, std::string(name) + " gespeichert, jetzt PADS", 4000);
+            screen_.message(P_PRINTSTATUS, std::string(name) + " saved, now PADS", 4000);
         }
-        else screen_.message(P_PRINTSTATUS, "Fehler beim Schreiben");
+        else screen_.message(P_PRINTSTATUS, "Error while writing");
         printList();
     }
 
@@ -738,8 +742,8 @@ private:
             }
             for (auto& t : screen_.taps())
             {
-                if (t.first == P_NEW && L) { L->lane[genralink::LANE_BASS].newRequest.fetch_add(1); screen_.message(P_STATUS, on ? "NEW: neue Basslinie ab dem naechsten Takt" : "kein GENRA CHOP"); }
-                else if (t.first == P_UNDO && L) { L->lane[genralink::LANE_BASS].undoRequest.fetch_add(1); screen_.message(P_STATUS, on ? "UNDO: vorige Basslinie" : "kein GENRA CHOP"); }
+                if (t.first == P_NEW && L) { L->lane[genralink::LANE_BASS].newRequest.fetch_add(1); screen_.message(P_STATUS, on ? "NEW: new bass line from the next bar" : "no GENRA CHOP"); }
+                else if (t.first == P_UNDO && L) { L->lane[genralink::LANE_BASS].undoRequest.fetch_add(1); screen_.message(P_STATUS, on ? "UNDO: the last bass line" : "no GENRA CHOP"); }
                 else if (t.first == P_PRINT) print(L);
                 else if (t.first == P_CAT) applyPreset(clamp(getInt(P_CAT), 0, kCats - 1), 0);
                 else if (t.first >= P_PRESET0 && t.first < P_PRESET0 + kPresetRows) applyPreset(clamp(getInt(P_CAT), 0, kCats - 1), t.first - P_PRESET0);
@@ -752,7 +756,7 @@ private:
                 if (L)
                 {
                     int row = presetRow_.load();
-                    std::string nm = row >= 0 && row < kPresetRows ? kPresets[presetCat_][row].name : "eigener Klang";
+                    std::string nm = row >= 0 && row < kPresetRows ? kPresets[presetCat_][row].name : "own sound";
                     genralink::Link::writeName(L->lane[genralink::LANE_BASS], nm);
                 }
             }

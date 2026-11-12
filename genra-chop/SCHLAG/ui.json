@@ -1,16 +1,16 @@
 {
   "style": {
-    "background": "ffd9d3c3",
-    "text": "ff2a2926",
-    "muted": "ff5a5850",
-    "accent": "ffc0322b"
+    "background": "ff1c1c1c",
+    "text": "ffe8e8e4",
+    "muted": "ffa8a8a4",
+    "accent": "ffd32f2f"
   },
   "pages": [
     {
       "name": "KNOBS",
       "controls": [
         {
-          "param": "LISTE",
+          "param": "LIST",
           "widget": "slider"
         }
       ]

@@ -1,0 +1,17 @@
+{
+  "name": "GENRA MELODY",
+  "manufacturer": "Genra",
+  "version": "0.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnMl",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/genra-melody-arm32.so",
+  "file64": "VST/genra-melody-arm64.so",
+  "description": "The melody companion of GENRA CHOP: plays and shapes the melody of GENRA CHOP's loop on the MPC's transport (RHYTHM, NOTES, RANGE, DENSITY), 36 presets in six kinds, KEY LOCK, PRINT as MIDI.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}

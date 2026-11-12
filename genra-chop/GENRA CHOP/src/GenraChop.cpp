@@ -51,25 +51,25 @@ static const int kSteps = hh::LEN;             // 64
 
 static const char* const kCaptions[][2] = {
     {"genra", "GENRA"}, {"chop", "CHOP"}, {"sample", "SAMPLE"}, {"loop", "LOOP"}, {"chopv", "CHOP"},
-    {"style", "STYLE"}, {"newall", "NEW ALL"}, {"new", "NEW"}, {"modus", "MODUS"}, {"transient", "Transient"},
+    {"style", "STYLE"}, {"newall", "NEW ALL"}, {"new", "NEW"}, {"modus", "MODE"}, {"transient", "Transient"},
     {"equal", "Equal"}, {"chops", "CHOPS"}, {"minus", "-"}, {"plus", "+"}, {"bank", "BANK"},
     {"bankA", "A"}, {"bankB", "B"}, {"bankC", "C"}, {"bankD", "D"}, {"undo", "UNDO"}, {"savewav", "SAVE WAV"},
-    {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODIE"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"},
+    {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODY"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"},
     {"auto", "AUTO"}, {"padsmode", "PADS"}, {"choke", "CHOKE"}, {"rev", "REV"}, {"lock", "LOCK"},
-    {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "Nach PRINT"}, {"autoinfo", "AUTO: der Loop spielt"},
-    {"padsinfo", "PADS: nur die Noten der MPC-Spur"}, {"printhere", "SPEICHERORT HIER"}, {"printstd", "STANDARD"},
-    {"back", "ZURÜCK"}, {"drives", "LAUFWERKE"}, {"pgup", "< SEITE"}, {"pgdn", "SEITE >"},
-    {"savehere", "SPEICHERORT HIER"}, {"loaded", "Geladen:"}, {"learn", "LERNEN"},
-    {"help1", "LERNEN antippen, dann die"}, {"help2", "Pads 1 bis 16 der Reihe nach"},
-    {"help3", "druecken (Pad 1 = unten links)"}, {"help4", "Gilt fuer alle GENRA-Plugins"},
-    {"r1", "Pad-Belegung"}, {"r2", "Laufwerke"}, {"r3", "Schreiben"}, {"r4", "LINK"}, {"r5", "Analyse"},
-    {"r6", "SAVE WAV nach"}};
+    {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
+    {"padsinfo", "PADS: only the MPC track's notes"}, {"printhere", "SAVE HERE"}, {"printstd", "STANDARD"},
+    {"back", "BACK"}, {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"},
+    {"savehere", "SAVE HERE"}, {"loaded", "Loaded:"}, {"learn", "LEARN"},
+    {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
+    {"help3", "(pad 1 = bottom left)"}, {"help4", "Used by every GENRA plugin"},
+    {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
+    {"r6", "SAVE WAV to"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
-static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODIE", "NEW PADS", "UNDO",
-    "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE ZURUECK", "STYLE VOR", "PRINT", "LERNEN", "ZURUECK",
-    "LAUFWERKE", "SEITE ZURUECK", "SEITE VOR", "SPEICHERORT HIER", "PRINT HIER", "PRINT STANDARD"};
+static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "UNDO",
+    "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK",
+    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD"};
 static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
 
 enum
@@ -140,7 +140,7 @@ hh::SampleData makeBuiltinLoop()
     s.L.assign(n, 0.f);
     s.R.assign(n, 0.f);
     s.sampleRate = sr;
-    s.name = "Testloop (eingebaut)";
+    s.name = "Test loop (built in)";
     const float chords[2][4] = {{54, 57, 61, 64}, {59, 62, 66, 69}};
     uint32_t rng = 12345;
     for (int b = 0; b < 8; ++b)
@@ -208,20 +208,20 @@ public:
         std::vector<std::string> styles;
         for (int i = 0; i < hh::NUM_STYLES; ++i) styles.push_back(styleLabel(i));
         addParam(choiceParam("style", "STYLE", styles, 5));
-        addParam(choiceParam("mode", "MODUS", {"Transient", "Equal"}, 0));
+        addParam(choiceParam("mode", "MODE", {"Transient", "Equal"}, 0));
         addParam(intParam("chops", "CHOPS", 4, 64, 16));
         addParam(choiceParam("bank", "BANK", {"A", "B", "C", "D"}, 0));
-        addParam(choiceParam("view", "ANSICHT", {"Sample", "Loop", "Chop"}, 0));
+        addParam(choiceParam("view", "VIEW", {"Sample", "Loop", "Chop"}, 0));
         addParam(boolParam("choke", "CHOKE", true));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
-        const char* lanes[kLanes] = {"DRUMS", "BASS", "MELODIE", "PADS"};
+        const char* lanes[kLanes] = {"DRUMS", "BASS", "MELODY", "PADS"};
         addButton("NEW ALL");
         for (int k = 0; k < kLanes; ++k) addButton((std::string("NEW ") + lanes[k]).c_str());
-        for (const char* b : {"UNDO", "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE ZURUECK", "STYLE VOR", "PRINT",
-                              "LERNEN", "ZURUECK", "LAUFWERKE", "SEITE ZURUECK", "SEITE VOR", "SPEICHERORT HIER",
-                              "PRINT HIER", "PRINT STANDARD", "REV", "LOCK"})
+        for (const char* b : {"UNDO", "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT",
+                              "LEARN", "BACK", "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE",
+                              "PRINT HERE", "PRINT STANDARD", "REV", "LOCK"})
             addButton(b);
-        addParam(intParam("scroll", "LISTE", 0, 1000, 500));
+        addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int i = 0; i < kRows; ++i) addButton(("TIPP " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
         for (const char* t : {"PFAD", "LISTINFO", "GELADEN", "KOPF", "CHOPZAHL", "TAKT", "STATUS", "LERNINFO",
@@ -295,7 +295,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 200;
+        i.version = 300;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -514,7 +514,7 @@ public:
         char b[32];
         if (index == P_FILTER)
         {
-            if (plain >= 99.5f) { out = "offen"; return true; }
+            if (plain >= 99.5f) { out = "open"; return true; }
             float hz = cutoffHz(plain);
             if (hz >= 1000.f) std::snprintf(b, sizeof b, "LP %.1fk", hz / 1000.f);
             else std::snprintf(b, sizeof b, "LP %.0f", hz);
@@ -522,7 +522,7 @@ public:
             return true;
         }
         if (index == P_PITCH) { std::snprintf(b, sizeof b, "%+d st", (int)std::lround(plain)); out = b; return true; }
-        if (index == P_DECAY) { std::snprintf(b, sizeof b, plain >= 99.5f ? "voll" : "%.0f %%", plain); out = b; return true; }
+        if (index == P_DECAY) { std::snprintf(b, sizeof b, plain >= 99.5f ? "full" : "%.0f %%", plain); out = b; return true; }
         if (index == P_LEVEL) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
         if (index == P_SCROLL) { listInfoText(out); return true; }
         if (index >= P_COL0) return false;
@@ -688,7 +688,7 @@ private:
         if (path == previewPath_)
         {
             stopPreview();
-            if (loadPath(path)) { cutAndPublish(true); screen_.message(P_LISTINFO, "geladen: " + stripWav(baseName(path))); }
+            if (loadPath(path)) { cutAndPublish(true); screen_.message(P_LISTINFO, "loaded: " + stripWav(baseName(path))); }
         }
         else startPreview(path);
     }
@@ -701,13 +701,13 @@ private:
         if (!mpc::readFile(path, bytes) || !hh::readWav(bytes, *d, err, 30.f))
         {
             delete d;
-            screen_.message(P_LISTINFO, "nicht lesbar: " + stripWav(baseName(path)));
+            screen_.message(P_LISTINFO, "cannot read: " + stripWav(baseName(path)));
             return;
         }
         for (auto& r : previewRetired_) delete r.exchange(nullptr);
         delete previewPending_.exchange(d, std::memory_order_acq_rel);
         previewPath_ = path;
-        screen_.message(P_LISTINFO, "nochmal tippen = laden");
+        screen_.message(P_LISTINFO, "tap again = load");
     }
 
     void stopPreview()
@@ -737,12 +737,12 @@ private:
     // ------------------------------------------------------------------ worker: sample and cut
     bool loadPath(const std::string& path)
     {
-        screen_.setText(P_ANALYSE, "laedt ...");
+        screen_.setText(P_ANALYSE, "loading ...");
         std::vector<uint8_t> bytes;
-        if (!mpc::readFile(path, bytes)) { screen_.setText(P_ANALYSE, "Fehler: nicht lesbar"); screen_.message(P_STATUS, "Sample nicht lesbar"); return false; }
+        if (!mpc::readFile(path, bytes)) { screen_.setText(P_ANALYSE, "Error: cannot read"); screen_.message(P_STATUS, "cannot read the sample"); return false; }
         hh::SampleData d;
         std::string err;
-        if (!hh::readWav(bytes, d, err, 60.f)) { screen_.setText(P_ANALYSE, "Fehler: " + err); screen_.message(P_STATUS, "Fehler: " + err); return false; }
+        if (!hh::readWav(bytes, d, err, 60.f)) { screen_.setText(P_ANALYSE, "Error: " + err); screen_.message(P_STATUS, "Error: " + err); return false; }
         d.path = path;
         d.name = stripWav(baseName(path));
         src_ = std::move(d);
@@ -806,11 +806,11 @@ private:
                 L->chordQuality[p].store((int8_t)(p < info_.count && c.valid() ? c.quality : -1));
             }
         }
-        if (restore) { publishLoop(); screen_.message(P_STATUS, "Projekt geladen"); }
+        if (restore) { publishLoop(); screen_.message(P_STATUS, "Project loaded"); }
         else
         {
             regenerate(-1, false);
-            screen_.message(P_STATUS, newSample ? "Neues Sample: neuer Loop" : "Neu geschnitten: neuer Loop");
+            screen_.message(P_STATUS, newSample ? "New sample: new loop" : "Chopped again: new loop");
         }
     }
 
@@ -1051,7 +1051,7 @@ private:
         char buf[64];
         std::snprintf(buf, sizeof buf, "%.0f BPM · %s · LINK %d", (double)bpm, keyText().c_str(), linked_);
         screen_.setText(P_HDR, buf);
-        screen_.setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
+        screen_.setText(P_LOADED, sampleName_.empty() ? std::string("Test loop (built in)") : sampleName_);
         screen_.setText(P_CHOPSTXT, std::to_string(clamp(getInt(P_CHOPS), 4, 64)));
         int s = clamp(sel_, 0, std::max(0, info_.count - 1));
         if (info_.count > 0)
@@ -1063,11 +1063,11 @@ private:
             screen_.setFrame(P_REVLIT, cRev_[s].load() ? 1 : 0);
             screen_.setFrame(P_LOCKLIT, padSet_[s].lock ? 1 : 0);
         }
-        else screen_.setText(P_STATUS, "kein Sample");
+        else screen_.setText(P_STATUS, "no sample");
 
         int step = curStep_.load();
         int bar = step >= 0 ? step / hh::STEPS : 0;
-        screen_.setText(P_BARTXT, step >= 0 ? "Takt " + std::to_string(bar + 1) + " / 4" : std::string("Stopp"));
+        screen_.setText(P_BARTXT, step >= 0 ? "Bar " + std::to_string(bar + 1) + " / 4" : std::string("Stop"));
         for (int j = 0; j < kPads; ++j)
         {
             int st = bar * hh::STEPS + j;
@@ -1091,37 +1091,37 @@ private:
         for (int k = 0; k < kLanes; ++k)
         {
             bool on = false;
-            std::string name = "nicht da";
+            std::string name = "not there";
             if (L)
             {
                 on = laneAlive_[k].check(L->lane[k].beat.load(), nowMs());
-                if (on) { name = genralink::Link::readName(L->lane[k]); if (name.empty()) name = "verbunden"; }
+                if (on) { name = genralink::Link::readName(L->lane[k]); if (name.empty()) name = "linked"; }
                 uint32_t rq = L->lane[k].newRequest.load(), uq = L->lane[k].undoRequest.load();
                 if (!laneReqInit_[k]) { laneReq_[k] = rq; laneUndoReq_[k] = uq; laneReqInit_[k] = true; }
                 if (rq != laneReq_[k]) { laneReq_[k] = rq; if (on) newLane(k); }
-                if (uq != laneUndoReq_[k]) { laneUndoReq_[k] = uq; if (on) { undoLane(k); screen_.message(P_STATUS, "UNDO von Spur " + std::to_string(k + 1)); } }
+                if (uq != laneUndoReq_[k]) { laneUndoReq_[k] = uq; if (on) { undoLane(k); screen_.message(P_STATUS, "UNDO from track " + std::to_string(k + 1)); } }
             }
             if (on) ++alive;
             screen_.setFrame(P_LAMP0 + k, on ? 1 : 0);
             screen_.setText(P_LANETXT0 + k, name);
         }
         linked_ = alive;
-        if (!L) screen_.setText(P_LINKINFO, "Fehler: " + link_.error());
-        else screen_.setText(P_LINKINFO, alive ? std::to_string(alive) + " Plugin(s) verbunden" : std::string("kein Begleit-Plugin"));
+        if (!L) screen_.setText(P_LINKINFO, "Error: " + link_.error());
+        else screen_.setText(P_LINKINFO, alive ? std::to_string(alive) + " plugin(s) linked" : std::string("no companion plugin"));
     }
 
     void newLane(int k)
     {
-        const char* names[kLanes] = {"Drums", "Bass", "Melodie", "Pads"};
+        const char* names[kLanes] = {"Drums", "Bass", "Melody", "Pads"};
         regenerate(k);
-        screen_.message(P_STATUS, std::string("NEW ") + names[k] + ": ab dem naechsten Takt");
+        screen_.message(P_STATUS, std::string("NEW ") + names[k] + ": from the next bar");
     }
 
     // ------------------------------------------------------------------ worker: files
     void saveChop()
     {
         int chop = sel_;
-        if (chop < 0 || chop >= info_.count || src_.frames() == 0) { screen_.message(P_STATUS, "erst einen Chop waehlen"); return; }
+        if (chop < 0 || chop >= info_.count || src_.frames() == 0) { screen_.message(P_STATUS, "choose a chop first"); return; }
         std::string dir;
         {
             std::lock_guard<std::mutex> g(mtx_);
@@ -1131,20 +1131,20 @@ private:
         dir += "/GENRA CHOP";
         if (!saveDir_.empty() && isDir(saveDir_)) dir = saveDir_;
         ::mkdir(dir.c_str(), 0777);
-        if (chopEnd_[chop] <= chopStart_[chop]) { screen_.message(P_STATUS, "Chop ist leer"); return; }
+        if (chopEnd_[chop] <= chopStart_[chop]) { screen_.message(P_STATUS, "the chop is empty"); return; }
         std::vector<uint8_t> wav = hh::writeWav(src_, chopStart_[chop], chopEnd_[chop], cRev_[chop].load(), (int)std::lround(cPitch_[chop].load()));
         char name[96];
         std::snprintf(name, sizeof name, "/%s chop%02d.wav", sampleName_.substr(0, 60).c_str(), chop + 1);
         bool ok = writeFileBytes(dir + name, wav.data(), wav.size());
-        screen_.message(P_STATUS, ok ? "Chop " + std::to_string(chop + 1) + " als WAV gespeichert" : std::string("Fehler beim Speichern"));
-        screen_.setText(P_WRITE, ok ? "OK" : "Fehler: WAV");
+        screen_.message(P_STATUS, ok ? "Chop " + std::to_string(chop + 1) + " saved as WAV" : std::string("Error while saving"));
+        screen_.setText(P_WRITE, ok ? "OK" : "Error: WAV");
     }
 
     // PRINT: the chop track as a MIDI file (pad notes as learned; chops above 16 play on the bank chosen)
     void print()
     {
         std::string dir = printDir(printDirChosen_);
-        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "kein Ordner zum Schreiben"); return; }
+        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "no folder to write to"); return; }
         const float bpm = bpmNow();
         const float swing = hh::STYLES[clamp(set_.style, 0, hh::NUM_STYLES - 1)].swing;
         std::vector<MidiNote> notes;
@@ -1167,36 +1167,36 @@ private:
         {
             set(P_AUTO, 1.f);
             notifyHostParameterChanged(P_AUTO);
-            screen_.message(P_PRINTSTATUS, std::string(name) + " gespeichert, jetzt PADS", 4000);
-            screen_.message(P_STATUS, "PRINT fertig: jetzt PADS", 3000);
+            screen_.message(P_PRINTSTATUS, std::string(name) + " saved, now PADS", 4000);
+            screen_.message(P_STATUS, "PRINT done: now PADS", 3000);
         }
-        else screen_.message(P_PRINTSTATUS, "Fehler beim Schreiben");
+        else screen_.message(P_PRINTSTATUS, "Error while writing");
         printTexts();
     }
 
     void printTexts()
     {
         std::string dir = printDir(printDirChosen_);
-        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("kein Ordner") : pathLabel(dir), true);
+        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("no folder") : pathLabel(dir), true);
         std::vector<std::string> list = dir.empty() ? std::vector<std::string>() : listPrints(dir);
         for (int r = 0; r < kPrintRows; ++r)
             screen_.setText(P_PRINTROW0 + r, r < (int)list.size() ? (r == 0 ? "> " : "") + list[(size_t)r].substr(0, list[(size_t)r].size() - 4) : std::string());
         char b[64];
-        std::snprintf(b, sizeof b, "Chop-Spur · 4 Takte · %.0f BPM · %s", (double)bpmNow(), keyText().c_str());
+        std::snprintf(b, sizeof b, "Chop track · 4 bars · %.0f BPM · %s", (double)bpmNow(), keyText().c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: der Loop spielt" : "PADS: nur die Noten der MPC-Spur");
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
     }
 
     void setupTexts()
     {
-        screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "gelernt" : "noch nicht gelernt"));
+        screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "learned" : "not learned yet"));
         screen_.setText(P_MAPINFO, pads_.info());
-        screen_.setText(P_SAVEDIRTXT, saveDir_.empty() ? std::string("neben dem Sample (/GENRA CHOP)") : pathLabel(saveDir_), true);
+        screen_.setText(P_SAVEDIRTXT, saveDir_.empty() ? std::string("next to the sample (/GENRA CHOP)") : pathLabel(saveDir_), true);
         std::string names;
         for (const std::string& d : findDrives(false)) names += (names.empty() ? "" : ", ") + pathLabel(d);
-        screen_.setText(P_DRIVES, names.empty() ? std::string("keins gefunden") : names);
+        screen_.setText(P_DRIVES, names.empty() ? std::string("none found") : names);
         std::string g = genraDir();
-        screen_.setText(P_WRITE, g.empty() ? std::string("kein Genra-Ordner") : "Genra-Ordner: " + pathLabel(g));
+        screen_.setText(P_WRITE, g.empty() ? std::string("no Genra folder") : "Genra folder: " + pathLabel(g));
     }
 
     // ------------------------------------------------------------------ worker: buttons
@@ -1205,12 +1205,12 @@ private:
         for (auto& t : screen_.taps())
         {
             const int p = t.first;
-            if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: neuer Loop ab dem naechsten Takt"); }
+            if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: new loop from the next bar"); }
             else if (p >= P_NEW0 && p < P_NEW0 + kLanes) newLane(p - P_NEW0);
             else if (p == P_UNDO)
             {
-                if (hasUndo_) { std::swap(pat_, undoPat_); publishLoop(); screen_.message(P_STATUS, "UNDO: voriger Loop"); }
-                else screen_.message(P_STATUS, "nichts zum Rueckgaengigmachen");
+                if (hasUndo_) { std::swap(pat_, undoPat_); publishLoop(); screen_.message(P_STATUS, "UNDO: the last loop"); }
+                else screen_.message(P_STATUS, "nothing to undo");
             }
             else if (p == P_SAVE) saveChop();
             else if (p == P_CHMINUS || p == P_CHPLUS)
@@ -1229,10 +1229,10 @@ private:
             else if (p == P_PRINT) print();
             else if (p == P_PRINTHERE)
             {
-                if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_PRINTSTATUS, "erst im BROWSER einen Ordner oeffnen");
-                else { printDirChosen_ = browser_.cwd(); settings_.set("printdir", printDirChosen_); settings_.save(); screen_.message(P_PRINTSTATUS, "Print-Ordner gesetzt"); }
+                if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_PRINTSTATUS, "open a folder in the BROWSER first");
+                else { printDirChosen_ = browser_.cwd(); settings_.set("printdir", printDirChosen_); settings_.save(); screen_.message(P_PRINTSTATUS, "Print folder set"); }
             }
-            else if (p == P_PRINTSTD) { printDirChosen_.clear(); settings_.set("printdir", ""); settings_.save(); screen_.message(P_PRINTSTATUS, "Print-Ordner: Genra/PRINT"); }
+            else if (p == P_PRINTSTD) { printDirChosen_.clear(); settings_.set("printdir", ""); settings_.save(); screen_.message(P_PRINTSTATUS, "Print folder: Genra/PRINT"); }
             else if (p == P_LEARN) pads_.startLearning();
             else if (p == P_SCROLL) browser_.scroll(t.second > 0 ? 1 + (t.second - 1) / 6 : -1 - (-t.second - 1) / 6);
             else if (p == P_BACK) { browser_.up(); rememberDir(); stopPreview(); }
@@ -1241,10 +1241,10 @@ private:
             else if (p == P_PGDN) browser_.page(1);
             else if (p == P_SAVEHERE)
             {
-                if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_LISTINFO, "erst einen Ordner oeffnen");
-                else { saveDir_ = browser_.cwd(); settings_.set("savedir", saveDir_); settings_.save(); screen_.message(P_LISTINFO, "Speicherort gesetzt"); }
+                if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_LISTINFO, "open a folder first");
+                else { saveDir_ = browser_.cwd(); settings_.set("savedir", saveDir_); settings_.save(); screen_.message(P_LISTINFO, "Save folder set"); }
             }
-            else if (p == P_AUTO) screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "AUTO: der Loop spielt" : "PADS: nur die Noten der MPC-Spur");
+            else if (p == P_AUTO) screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
             else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
         }
     }
@@ -1277,7 +1277,7 @@ private:
             }
             handleTaps();
             if (bankReset_.exchange(false)) { notifyHostParameterChanged(P_BANK); requestDisplayUpdate(); }
-            if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "gelernt und gespeichert", 3000);
+            if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "learned and saved", 3000);
 
             int req = selReq_.exchange(-1);
             if (req >= 0 && req < std::max(1, info_.count) && req != sel_) { sel_ = req; knobsFromChop(); }
@@ -1287,7 +1287,7 @@ private:
             if (m != lastMode || c != lastChops) { lastMode = m; lastChops = c; cutPending = true; cutChanged = now; }
             if (cutPending && now - cutChanged > std::chrono::milliseconds(400)) { cutPending = false; cutAndPublish(false); }
             int st = getInt(P_STYLE);
-            if (st != lastStyle) { lastStyle = st; screen_.message(P_STATUS, "STYLE " + styleLabel(st) + ": NEW ALL druecken", 3000); }
+            if (st != lastStyle) { lastStyle = st; screen_.message(P_STATUS, "STYLE " + styleLabel(st) + ": press NEW ALL", 3000); }
 
             if (now - lastSlow > std::chrono::seconds(2))
             {

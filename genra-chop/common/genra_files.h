@@ -110,7 +110,7 @@ inline bool writeFileBytes(const std::string& path, const void* data, size_t n)
 // "/nvme/Samples" -> "SSD/Samples", "/media/Archive/x" -> "Archive/x"
 inline std::string pathLabel(const std::string& p)
 {
-    if (p == "*") return "(alle Mounts)";
+    if (p == "*") return "(all mounts)";
     if (p.compare(0, 5, "/nvme") == 0) return "SSD" + p.substr(5);
     for (const char* pre : {"/media/", "/mnt/", "/run/media/"})
     {
@@ -316,8 +316,8 @@ public:
     }
     std::string info() const
     {
-        if (learning_.load()) { int s = learnStep_.load(); return s < 16 ? "Jetzt Pad " + std::to_string(s + 1) + " druecken ..." : std::string("fertig"); }
-        return learned_.load() ? "gelernt, Pad 1 = Note " + std::to_string(noteOf(0)) : std::string("Standard, Pad 1 = Note 36");
+        if (learning_.load()) { int s = learnStep_.load(); return s < 16 ? "Now press pad " + std::to_string(s + 1) + " ..." : std::string("done"); }
+        return learned_.load() ? "learned, pad 1 = note " + std::to_string(noteOf(0)) : std::string("default, pad 1 = note 36");
     }
 
 private:
@@ -489,7 +489,7 @@ public:
         {
             if (cwd_ == "*") entries_.push_back({"..", "", 0});
             for (const std::string& d : findDrives(cwd_ == "*")) entries_.push_back({pathLabel(d), d, 3});
-            if (cwd_.empty()) entries_.push_back({"(alle Mounts)", "*", 1});
+            if (cwd_.empty()) entries_.push_back({"(all mounts)", "*", 1});
         }
         else
         {
@@ -536,7 +536,7 @@ public:
         size_t i = (size_t)(top_ + r);
         if (i >= entries_.size()) return std::string();
         const Entry& e = entries_[i];
-        if (e.kind == 0) return "..  (zurueck)";
+        if (e.kind == 0) return "..  (back)";
         if (e.kind == 1 || e.kind == 3) return "[" + e.label + "]";
         if (!preview.empty() && e.path == preview) return "» " + stripWav(e.label);
         return ((!loaded.empty() && e.path == loaded) ? "> " : "") + stripWav(e.label);
@@ -546,13 +546,13 @@ public:
         size_t i = (size_t)(top_ + r);
         return i < entries_.size() && !path.empty() && entries_[i].path == path;
     }
-    std::string pathText() const { return cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_); }
+    std::string pathText() const { return cwd_.empty() ? std::string("Drives") : pathLabel(cwd_); }
     std::string info() const
     {
         int n = (int)entries_.size();
         if (!n) return "leer";
         char b[64];
-        std::snprintf(b, sizeof b, "Zeile %d-%d von %d", top_ + 1, std::min(n, top_ + rows), n);
+        std::snprintf(b, sizeof b, "Rows %d-%d of %d", top_ + 1, std::min(n, top_ + rows), n);
         return b;
     }
 

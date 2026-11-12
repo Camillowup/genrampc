@@ -43,23 +43,23 @@ namespace {
 static const int kVoices = 8, kSlots = 4, kSteps = genralink::kSteps, kRows = 10, kPrintRows = 7;
 static const int kMaxFiles = 24;
 static const float kMaxSeconds = 2.f;
-const char* const kVoiceNames[kVoices] = {"KICK", "SNARE", "CLAP", "RIM", "HAT ZU", "HAT OFFEN", "TOM", "PERC"};
+const char* const kVoiceNames[kVoices] = {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"};
 enum Func { F_TUNE, F_DECAY, F_DRIVE, F_BITS, F_REPEAT, F_PAN, F_REVERSE, F_FILTER, NUM_FUNCS };
 const char* const kFuncNames[NUM_FUNCS] = {"TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"};
 const int kDefaultFunc[kSlots] = {F_TUNE, F_DECAY, F_DRIVE, F_PAN};
 
 static const char* const kCaptions[][2] = {
     {"schlag", "SCHLAG"}, {"auto", "AUTO"}, {"padsmode", "PADS"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
-    {"m", "M"}, {"s", "S"}, {"v1", "KICK"}, {"v2", "SNARE"}, {"v3", "CLAP"}, {"v4", "RIM"}, {"v5", "HAT ZU"},
-    {"v6", "HAT OFFEN"}, {"v7", "TOM"}, {"v8", "PERC"}, {"p1", "1"}, {"p2", "2"}, {"p3", "3"}, {"p4", "4"},
-    {"p5", "5"}, {"p6", "6"}, {"p7", "7"}, {"p8", "8"}, {"ordner", "· ORDNER"}, {"back", "ORDNER ▲"},
-    {"drives", "LAUFWERKE"}, {"pgup", "< SEITE"}, {"pgdn", "SEITE >"}, {"root", "HAUPTORDNER HIER"},
-    {"hint1", "1. Tipp = hoeren"}, {"hint2", "2. Tipp = Sample der Stimme"}, {"print", "PRINT"},
-    {"printtitle", "· PRINT"}, {"after", "Nach PRINT"}, {"autoinfo", "AUTO: der Loop spielt"},
-    {"padsinfo", "PADS: nur die Noten der MPC-Spur"}, {"learn", "LERNEN"}, {"help1", "LERNEN antippen, dann die"},
-    {"help2", "Pads 1 bis 16 der Reihe nach"}, {"help3", "druecken (Pad 1 = unten links)"},
-    {"help4", "Gilt fuer alle GENRA-Plugins"}, {"choke", "HAT-CHOKE"}, {"r1", "Pad-Belegung"}, {"r2", "Hauptordner"},
-    {"r3", "LINK"}, {"r4", "Speicher"}, {"r5", "Version"}, {"setup", "· SETUP"}};
+    {"m", "M"}, {"s", "S"}, {"v1", "KICK"}, {"v2", "SNARE"}, {"v3", "CLAP"}, {"v4", "RIM"}, {"v5", "CL HAT"},
+    {"v6", "OP HAT"}, {"v7", "TOM"}, {"v8", "PERC"}, {"p1", "1"}, {"p2", "2"}, {"p3", "3"}, {"p4", "4"},
+    {"p5", "5"}, {"p6", "6"}, {"p7", "7"}, {"p8", "8"}, {"ordner", "· FOLDER"}, {"back", "FOLDER ▲"},
+    {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"}, {"root", "ROOT HERE"},
+    {"hint1", "1st tap = listen"}, {"hint2", "2nd tap = the voice's sample"}, {"print", "PRINT"},
+    {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
+    {"padsinfo", "PADS: only the MPC track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
+    {"help2", "pads 1 to 16 in order"}, {"help3", "(pad 1 = bottom left)"},
+    {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
+    {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -128,7 +128,7 @@ Sample synth(int voice, float sr)
 {
     Sample s;
     s.rate = sr;
-    s.name = std::string(kVoiceNames[voice]) + " (eingebaut)";
+    s.name = std::string(kVoiceNames[voice]) + " (built in)";
     const float lens[kVoices] = {0.45f, 0.25f, 0.3f, 0.08f, 0.06f, 0.4f, 0.4f, 0.12f};
     size_t n = (size_t)(lens[voice] * sr);
     s.L.resize(n);
@@ -168,17 +168,17 @@ public:
         std::vector<std::string> funcs(kFuncNames, kFuncNames + NUM_FUNCS);
         for (int v = 0; v < kVoices; ++v)
             for (int k = 0; k < kSlots; ++k)
-                addParam(choiceParam(("func" + std::to_string(v + 1) + "_" + std::to_string(k + 1)).c_str(), ("FUNKTION " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str(), funcs, kDefaultFunc[k]));
+                addParam(choiceParam(("func" + std::to_string(v + 1) + "_" + std::to_string(k + 1)).c_str(), ("FUNCTION " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str(), funcs, kDefaultFunc[k]));
         for (int v = 0; v < kVoices; ++v)
             for (int k = 0; k < kSlots; ++k)
-                addParam(floatParam(("val" + std::to_string(v + 1) + "_" + std::to_string(k + 1)).c_str(), ("WERT " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str(), 0.f, 100.f, defaultValue(kDefaultFunc[k]), "", 0));
+                addParam(floatParam(("val" + std::to_string(v + 1) + "_" + std::to_string(k + 1)).c_str(), ("VALUE " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str(), 0.f, 100.f, defaultValue(kDefaultFunc[k]), "", 0));
         addParam(floatParam("volume", "VOLUME", -40.f, 6.f, 0.f, "dB", 1));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
         addParam(boolParam("choke", "HAT CHOKE", true));
-        addParam(choiceParam("voice", "STIMME", {"KICK", "SNARE", "CLAP", "RIM", "HAT ZU", "HAT OFFEN", "TOM", "PERC"}, 0));
-        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LERNEN", "ORDNER HOCH", "LAUFWERKE", "SEITE ZURUECK", "SEITE VOR", "HAUPTORDNER HIER"})
+        addParam(choiceParam("voice", "VOICE", {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"}, 0));
+        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE"})
             addButton(b);
-        addParam(intParam("scroll", "LISTE", 0, 1000, 500));
+        addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
             for (int k = 0; k < kSlots; ++k) addButton(("FUNKTIONSWAHL " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addButton(("WAHL " + std::to_string(v + 1)).c_str());
@@ -209,7 +209,7 @@ public:
         for (int i = P_FUNCTAP0; i < P_ROWTAP0 + kRows; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "SCHLAG 0.1 · LINK v3");
+        screen_.setText(P_VERSION, "SCHLAG 0.2 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -244,7 +244,7 @@ public:
         i.name = "SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 100;
+        i.version = 200;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -264,7 +264,7 @@ public:
             {
                 Kit* k = new Kit();
                 k->samples.push_back(synth(v, (float)sampleRate));
-                kitInfo_[v] = {std::string(), "eingebaut", 1};
+                kitInfo_[v] = {std::string(), "built in", 1};
                 delete pendingKit_[v].exchange(k);
             }
             worker_ = std::thread([this] { workerMain(); });
@@ -470,13 +470,13 @@ private:
         switch (f)
         {
             case F_TUNE: std::snprintf(b, sizeof b, "%+d st", (int)std::lround((v - 50.f) * 0.24f)); break;
-            case F_DECAY: std::snprintf(b, sizeof b, v >= 99.5f ? "voll" : "%.0f %%", v); break;
+            case F_DECAY: std::snprintf(b, sizeof b, v >= 99.5f ? "full" : "%.0f %%", v); break;
             case F_DRIVE: std::snprintf(b, sizeof b, "%.0f %%", v); break;
             case F_BITS: std::snprintf(b, sizeof b, "%d", bitsOf(v)); break;
-            case F_REPEAT: { const char* r[4] = {"aus", "1/32", "1/48", "1/64"}; std::snprintf(b, sizeof b, "%s", r[repeatIndex(v)]); break; }
-            case F_PAN: { int p = (int)std::lround((v - 50.f) * 2.f); if (!p) std::snprintf(b, sizeof b, "Mitte"); else std::snprintf(b, sizeof b, "%s %d", p < 0 ? "L" : "R", std::abs(p)); break; }
-            case F_REVERSE: std::snprintf(b, sizeof b, v >= 50.f ? "an" : "aus"); break;
-            default: if (v >= 99.5f) std::snprintf(b, sizeof b, "offen"); else std::snprintf(b, sizeof b, "LP %.1fk", cutoffHz(v) / 1000.f); break;
+            case F_REPEAT: { const char* r[4] = {"off", "1/32", "1/48", "1/64"}; std::snprintf(b, sizeof b, "%s", r[repeatIndex(v)]); break; }
+            case F_PAN: { int p = (int)std::lround((v - 50.f) * 2.f); if (!p) std::snprintf(b, sizeof b, "Center"); else std::snprintf(b, sizeof b, "%s %d", p < 0 ? "L" : "R", std::abs(p)); break; }
+            case F_REVERSE: std::snprintf(b, sizeof b, v >= 50.f ? "on" : "off"); break;
+            default: if (v >= 99.5f) std::snprintf(b, sizeof b, "open"); else std::snprintf(b, sizeof b, "LP %.1fk", cutoffHz(v) / 1000.f); break;
         }
         return b;
     }
@@ -637,7 +637,7 @@ private:
 
     std::string folderLabel(const std::string& f) const
     {
-        if (f.empty()) return "eingebaut";
+        if (f.empty()) return "built in";
         if (!root_.empty() && f.compare(0, root_.size(), root_) == 0 && f.size() > root_.size()) return f.substr(root_.size() + 1);
         return baseName(f);
     }
@@ -653,17 +653,17 @@ private:
             previewPath_.clear();
             size_t i = path.find_last_of('/');
             if (loadVoice(v, path.substr(0, i), path.substr(i + 1))) screen_.message(P_LISTINFO, std::string(kVoiceNames[v]) + ": " + stripWav(baseName(path)));
-            else screen_.message(P_LISTINFO, "nicht lesbar");
+            else screen_.message(P_LISTINFO, "cannot read");
         }
         else
         {
             Wave w;
-            if (!loadWav(path, w, 4.f)) { screen_.message(P_LISTINFO, "nicht lesbar"); return; }
+            if (!loadWav(path, w, 4.f)) { screen_.message(P_LISTINFO, "cannot read"); return; }
             Sample* s = new Sample(toSample(w, baseName(path)));
             for (auto& r : previewRetired_) delete r.exchange(nullptr);
             delete previewPending_.exchange(s, std::memory_order_acq_rel);
             previewPath_ = path;
-            screen_.message(P_LISTINFO, "nochmal tippen = Sample der Stimme");
+            screen_.message(P_LISTINFO, "tap again = the voice's sample");
         }
     }
 
@@ -681,7 +681,7 @@ private:
         int bpm100 = L ? L->bpmX100.load() : 0;
         char b[64];
         if (alive) std::snprintf(b, sizeof b, "LINK GENRA CHOP · %.0f BPM", bpm100 / 100.0);
-        else std::snprintf(b, sizeof b, "kein GENRA CHOP");
+        else std::snprintf(b, sizeof b, "no GENRA CHOP");
         screen_.setText(P_HDRLINK, b);
         for (int v = 0; v < kVoices; ++v)
         {
@@ -689,10 +689,10 @@ private:
             screen_.setText(P_SAMPLETXT0 + v, kitInfo_[v].file);
         }
         int sv = clamp(getInt(P_VOICE), 0, kVoices - 1);
-        screen_.setText(P_VOICEINFO, std::string("Stimme: ") + kVoiceNames[sv]);
-        screen_.setText(P_VFOLDER, "Ordner: " + folderLabel(kitInfo_[sv].folder));
+        screen_.setText(P_VOICEINFO, std::string("Voice: ") + kVoiceNames[sv]);
+        screen_.setText(P_VFOLDER, "Folder: " + folderLabel(kitInfo_[sv].folder));
         screen_.setText(P_VSAMPLE, "Sample: " + kitInfo_[sv].file);
-        screen_.setText(P_VCOUNT, std::to_string(kitInfo_[sv].count) + " Samples zum Wuerfeln");
+        screen_.setText(P_VCOUNT, std::to_string(kitInfo_[sv].count) + " samples to roll");
         screen_.setText(P_PATH, browser_.pathText(), true);
         screen_.setText(P_LISTINFO, browser_.info());
         std::string loaded;
@@ -701,19 +701,19 @@ private:
             loaded = voiceFolder_[sv].empty() ? std::string() : voiceFolder_[sv] + "/" + voiceFile_[sv];
         }
         for (int r = 0; r < kRows; ++r) screen_.setText(P_ROWT0 + r, browser_.rowText(r, loaded, previewPath_));
-        std::snprintf(b, sizeof b, "Drums · 4 Takte · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
+        std::snprintf(b, sizeof b, "Drums · 4 bars · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: der Loop spielt" : "PADS: nur die Noten der MPC-Spur");
-        screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "gelernt" : "noch nicht gelernt"));
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
+        screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "learned" : "not learned yet"));
         screen_.setText(P_MAPINFO, pads_.info());
-        screen_.setText(P_ROOTTXT, root_.empty() ? std::string("noch keiner (ORDNER: HAUPTORDNER HIER)") : pathLabel(root_), true);
-        screen_.setText(P_LINKINFO, !L ? "Fehler: " + link_.error() : (alive ? std::string("GENRA CHOP verbunden") : std::string("kein GENRA CHOP")));
+        screen_.setText(P_ROOTTXT, root_.empty() ? std::string("none yet (FOLDER: ROOT HERE)") : pathLabel(root_), true);
+        screen_.setText(P_LINKINFO, !L ? "Error: " + link_.error() : (alive ? std::string("GENRA CHOP linked") : std::string("no GENRA CHOP")));
         size_t bytes = 0;
         for (size_t x : kitBytes_) bytes += x;
-        std::snprintf(b, sizeof b, "%.1f MB Samples geladen", bytes / 1048576.0);
+        std::snprintf(b, sizeof b, "%.1f MB samples loaded", bytes / 1048576.0);
         screen_.setText(P_MEMINFO, b);
         int step = curStep_.load();
-        screen_.setText(P_STATUS, step >= 0 ? "Takt " + std::to_string(step / 16 + 1) + " / 4" : std::string(getInt(P_AUTO) == 0 ? "AUTO" : "PADS"));
+        screen_.setText(P_STATUS, step >= 0 ? "Bar " + std::to_string(step / 16 + 1) + " / 4" : std::string(getInt(P_AUTO) == 0 ? "AUTO" : "PADS"));
     }
 
     void cells()
@@ -746,7 +746,7 @@ private:
     void print(genralink::LinkData* L)
     {
         std::string dir = printDir(std::string());
-        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "kein Ordner zum Schreiben"); return; }
+        if (dir.empty()) { screen_.message(P_PRINTSTATUS, "no folder to write to"); return; }
         const genralink::Loop& l = loop_;
         const float swing = l.swingX1000 / 1000.f;
         bool solo = false;
@@ -776,16 +776,16 @@ private:
         {
             set(P_AUTO, 1.f);
             notifyHostParameterChanged(P_AUTO);
-            screen_.message(P_PRINTSTATUS, std::string(name) + " gespeichert, jetzt PADS", 4000);
+            screen_.message(P_PRINTSTATUS, std::string(name) + " saved, now PADS", 4000);
         }
-        else screen_.message(P_PRINTSTATUS, "Fehler beim Schreiben");
+        else screen_.message(P_PRINTSTATUS, "Error while writing");
         printList();
     }
 
     void printList()
     {
         std::string dir = printDir(std::string());
-        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("kein Ordner") : pathLabel(dir), true);
+        screen_.setText(P_PRINTDIRTXT, dir.empty() ? std::string("no folder") : pathLabel(dir), true);
         std::vector<std::string> list = dir.empty() ? std::vector<std::string>() : listPrints(dir);
         for (int r = 0; r < kPrintRows; ++r)
             screen_.setText(P_PRINTROW0 + r, r < (int)list.size() ? (r == 0 ? "> " : "") + list[(size_t)r].substr(0, list[(size_t)r].size() - 4) : std::string());
@@ -815,7 +815,7 @@ private:
                     std::lock_guard<std::mutex> g(mtx_);
                     if (loadReq_[v]) { want = true; loadReq_[v] = false; folder = voiceFolder_[v]; file = voiceFile_[v]; }
                 }
-                if (want && !folder.empty() && !loadVoice(v, folder, file)) screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": Ordner fehlt");
+                if (want && !folder.empty() && !loadVoice(v, folder, file)) screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": folder missing");
             }
             bool on = L && alive.check(L->writerBeat.load(), nowMs());
             if (L)
@@ -841,12 +841,12 @@ private:
             for (auto& t : screen_.taps())
             {
                 const int p = t.first;
-                if (p == P_NEW && L) { L->lane[genralink::LANE_DRUMS].newRequest.fetch_add(1); screen_.message(P_STATUS, on ? "NEW: neue Drums ab dem naechsten Takt" : "kein GENRA CHOP"); }
-                else if (p == P_UNDO && L) { L->lane[genralink::LANE_DRUMS].undoRequest.fetch_add(1); screen_.message(P_STATUS, on ? "UNDO: vorige Drums" : "kein GENRA CHOP"); }
+                if (p == P_NEW && L) { L->lane[genralink::LANE_DRUMS].newRequest.fetch_add(1); screen_.message(P_STATUS, on ? "NEW: new drums from the next bar" : "no GENRA CHOP"); }
+                else if (p == P_UNDO && L) { L->lane[genralink::LANE_DRUMS].undoRequest.fetch_add(1); screen_.message(P_STATUS, on ? "UNDO: the last drums" : "no GENRA CHOP"); }
                 else if (p == P_BASIC)
                 {
                     for (int v = 0; v < kVoices; ++v) { set(P_RANDOM0 + v, 0.f); notifyHostParameterChanged(P_RANDOM0 + v); lastRandom[v] = 0.f; swapped_[v].store(0); }
-                    screen_.message(P_STATUS, "BASIC: alle Stimmen auf ihr Sample");
+                    screen_.message(P_STATUS, "BASIC: every voice on its sample");
                 }
                 else if (p == P_PRINT) print(L);
                 else if (p == P_LEARN) pads_.startLearning();
@@ -857,8 +857,8 @@ private:
                 else if (p == P_SCROLL) browser_.scroll(t.second > 0 ? 1 + (t.second - 1) / 6 : -1 - (-t.second - 1) / 6);
                 else if (p == P_ROOTHERE)
                 {
-                    if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_LISTINFO, "erst einen Ordner oeffnen");
-                    else { root_ = browser_.cwd(); settings_.set("root", root_); settings_.save(); screen_.message(P_LISTINFO, "Hauptordner gesetzt"); }
+                    if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_LISTINFO, "open a folder first");
+                    else { root_ = browser_.cwd(); settings_.set("root", root_); settings_.save(); screen_.message(P_LISTINFO, "Root folder set"); }
                 }
                 else if (p >= P_FUNCTAP0 && p < P_FUNCTAP0 + kVoices * kSlots)
                 {
@@ -880,11 +880,11 @@ private:
                         f = voiceFolder_[v];
                     }
                     if (!f.empty()) browser_.open(f);
-                    screen_.message(P_STATUS, std::string(kVoiceNames[v]) + " gewaehlt: Seite ORDNER");
+                    screen_.message(P_STATUS, std::string(kVoiceNames[v]) + " chosen: page FOLDER");
                 }
                 else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
             }
-            if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "gelernt und gespeichert", 3000);
+            if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "learned and saved", 3000);
             if (nowMs() - lastSlow > 1500)
             {
                 lastSlow = nowMs();

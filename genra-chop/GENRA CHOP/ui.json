@@ -8,7 +8,7 @@
   "pages": [
     { "name": "KNOBS",
       "controls": [
-        { "param": "LISTE", "widget": "slider" }
+        { "param": "LIST", "widget": "slider" }
       ] }
   ]
 }
