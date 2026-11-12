@@ -56,7 +56,8 @@ enum
     P_PADNOTE,    // MIDI note of pad 1
     P_CHORD0,     // 16 read-only: chords of the current bank
     P_WAVE0 = P_CHORD0 + 16, // 16 read-only bars: level of each chop of the current bank
-    P_COUNT = P_WAVE0 + 16
+    P_DIAG = P_WAVE0 + 16, // read-only: how often the MPC asked about BROWSE/OPEN with another value vs. real turns
+    P_COUNT
 };
 
 static const int kVoices = 8;
@@ -117,7 +118,7 @@ std::vector<std::string> listDir(const std::string& dir, bool wantDirs)
     while (dirent* e = ::readdir(d))
     {
         std::string n = e->d_name;
-        if (n.empty() || n[0] == '.') continue;
+        if (n.empty() || n[0] == '.' || n[0] == '$') continue; // hidden, $RECYCLE.BIN ...
         std::string full = dir + "/" + n;
         bool dirp = isDir(full);
         if (wantDirs && dirp)
@@ -231,10 +232,12 @@ public:
             std::snprintf(nm, sizeof nm, "CHOP %d", i + 1);
             addText(id, nm);
         }
+        addText("diag", "DIAGNOSE");
         for (int i = 0; i < P_COUNT; ++i) texts_.push_back(std::string());
         seenBrowse_ = getInt(P_BROWSE);
         seenOpen_ = getInt(P_OPEN);
         seenSave_ = getInt(P_SAVE);
+        prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
         for (auto& r : retired_) r.store(nullptr);
     }
 
@@ -253,7 +256,7 @@ public:
         i.name = "CHOP TEST";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 't');
-        i.version = 2000;
+        i.version = 3000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -377,6 +380,7 @@ public:
         seenBrowse_ = getInt(P_BROWSE);
         seenOpen_ = getInt(P_OPEN);
         seenSave_ = getInt(P_SAVE);
+        prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
     }
 
     // ------------------------------------------------------------------ screen texts (UI thread)
@@ -385,8 +389,21 @@ public:
         (void)plain;
         std::lock_guard<std::mutex> g(mtx_);
         // the endless controls act here too, so the text the MPC reads right after a turn is already the new one
-        if (index == P_BROWSE) { stepBrowserLocked(); out = browseTextLocked(); return true; }
-        if (index == P_OPEN)   { openIfTurnedLocked(); out = cwd_.empty() ? std::string("> Laufwerke") : "> " + pathLabel(cwd_); return true; }
+        // BROWSE / OPEN: only a preview here. The MPC sets a value for a moment to ask for its text and sets it back;
+        // that must not count as a turn. The worker acts once a new value has stayed (see stableTurn).
+        if (index == P_BROWSE)
+        {
+            if (getInt(P_BROWSE) != seenBrowse_) ++asked_;
+            out = browseTextLocked(previewCursorLocked());
+            return true;
+        }
+        if (index == P_OPEN)
+        {
+            if (getInt(P_OPEN) != seenOpen_) ++asked_;
+            int c = previewCursorLocked();
+            out = entries_.empty() ? std::string("(leer)") : "oeffnen: " + entries_[(size_t)c].label;
+            return true;
+        }
         if (index == P_SAVE)   { out = saveRequested_ ? std::string("sichert ...") : std::string("drehen = sichern"); return true; }
         if (index == P_PATH)   { out = cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_); return true; }
         if (isText(index)) { out = texts_[(size_t)index]; return true; }
@@ -526,23 +543,27 @@ private:
     }
 
     // BROWSE is endless: only the change since the last look counts (one wheel step = one entry).
-    void stepBrowserLocked()
+    static int stepOf(int d) { return d == 0 ? 0 : d > 0 ? 1 + (d - 1) / 6 : -1 - (-d - 1) / 6; } // a wheel click = one entry
+    int previewCursorLocked() const
     {
-        int v = getInt(P_BROWSE);
+        if (entries_.empty()) return 0;
+        return clamp(cursor_ + stepOf(getInt(P_BROWSE) - seenBrowse_), 0, (int)entries_.size() - 1);
+    }
+    void stepBrowserLocked(int v)
+    {
         int d = v - seenBrowse_;
         seenBrowse_ = v;
         if (d == 0 || entries_.empty()) return;
-        int step = d > 0 ? 1 + (d - 1) / 6 : -1 - (-d - 1) / 6; // fast turns move faster, a wheel click moves one
-        cursor_ = clamp(cursor_ + step, 0, (int)entries_.size() - 1);
+        cursor_ = clamp(cursor_ + stepOf(d), 0, (int)entries_.size() - 1);
         textsDirty_ = true;
     }
 
-    std::string browseTextLocked() const
+    std::string browseTextLocked(int cur) const
     {
         if (entries_.empty()) return "(leer)";
         char buf[16];
-        std::snprintf(buf, sizeof buf, "  %d/%d", cursor_ + 1, (int)entries_.size());
-        std::string label = entries_[(size_t)cursor_].label;
+        std::snprintf(buf, sizeof buf, "  %d/%d", cur + 1, (int)entries_.size());
+        std::string label = entries_[(size_t)cur].label;
         if (label.size() > 22) label = label.substr(0, 21) + "~";
         return label + buf;
     }
@@ -555,11 +576,11 @@ private:
     }
 
     // OPEN is endless too: any turn opens what BROWSE shows.
-    void openIfTurnedLocked()
+    void openLocked(int v)
     {
-        int v = getInt(P_OPEN);
         if (v == seenOpen_) return;
         seenOpen_ = v;
+        ++opened_;
         if (entries_.empty()) return;
         const Entry e = entries_[(size_t)cursor_];
         if (e.kind == 0) { std::string from = cwd_; cwd_ = cwd_ == "*" ? std::string() : parentOf(cwd_); listLocked(from); }
@@ -824,16 +845,18 @@ private:
                 if (cwd_.empty()) { std::string sel = entries_.empty() ? std::string() : entries_[(size_t)cursor_].path; listLocked(sel); }
             }
 
-            // the endless controls (also handled in formatValue, whichever comes first)
+            // the endless controls: a new value counts once it has stayed for two looks (>= 40 ms);
+            // the MPC's quick "what would the text be" probes are set back long before that
             std::string want, dirToSave;
             {
                 std::lock_guard<std::mutex> g(mtx_);
-                stepBrowserLocked();
-                openIfTurnedLocked();
+                int b = getInt(P_BROWSE), o = getInt(P_OPEN), sv = getInt(P_SAVE);
+                if (b != seenBrowse_ && b == prevBrowse_) stepBrowserLocked(b);
+                if (o != seenOpen_ && o == prevOpen_) openLocked(o);
+                if (sv != seenSave_ && sv == prevSave_) { seenSave_ = sv; saveRequested_ = true; }
+                prevBrowse_ = b; prevOpen_ = o; prevSave_ = sv;
                 if (pathRequest_) { want = requestedPath_; pathRequest_ = false; }
                 if (lastDirDirty_) { dirToSave = lastDir_; lastDirDirty_ = false; }
-                int sv = getInt(P_SAVE);
-                if (sv != seenSave_) { seenSave_ = sv; saveRequested_ = true; }
             }
             if (!dirToSave.empty()) saveSettings(dirToSave);
             if (!want.empty())
@@ -860,6 +883,16 @@ private:
                 textsDirty_ = true;
             }
 
+            {
+                char d[48];
+                int asked, opened;
+                {
+                    std::lock_guard<std::mutex> g(mtx_);
+                    asked = asked_; opened = opened_;
+                }
+                std::snprintf(d, sizeof d, "Abfragen %d, geoeffnet %d", asked, opened);
+                setText(P_DIAG, d);
+            }
             setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
             updateScreen();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -904,6 +937,7 @@ private:
     std::vector<Entry> entries_;
     std::string cwd_, lastDir_;          // "" = the drive list, "*" = every mount
     int cursor_ = 0, seenBrowse_ = 0, seenOpen_ = 0, seenSave_ = 0;
+    int prevBrowse_ = 0, prevOpen_ = 0, prevSave_ = 0, asked_ = 0, opened_ = 0;
     std::string loadedPath_, requestedPath_;
     bool pathRequest_ = false, textsDirty_ = false, lastDirDirty_ = false, saveRequested_ = false;
 };

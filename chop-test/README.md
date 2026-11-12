@@ -20,6 +20,10 @@ The browser's last folder is remembered in `settings.txt` (in the plugin's folde
 list ends with `(alle Mounts)/`: every mount point of the system, for finding a drive that is not listed.
 All controls are labelled sliders (the MPC showed the SDK's switch widgets without labels).
 
+BROWSE, OPEN and SAVE CHOP act only once a new value has stayed for about 40 ms: the MPC sets a parameter for a
+moment to ask for its text and sets it back, and those probes must not open folders. While turning, BROWSE shows
+the entry it will land on and OPEN what it will open. **DIAGNOSE** on SETUP counts the probes and the real opens.
+
 Play the chops with the pads: pad 1 = MIDI note 36 (C1), pads 1–64 over banks A–D. If the pads are mapped
 differently, change **PAD NOTE** on SETUP (36, 37, 48 or 60); **PAD** on TEST shows the note that arrives.
 Without a loaded WAV a built-in test loop is used, so the pads always sound.

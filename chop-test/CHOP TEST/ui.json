@@ -221,6 +221,10 @@
           "param": "PAD NOTE",
           "widget": "slider",
           "overlay": "menu"
+        },
+        {
+          "param": "DIAGNOSE",
+          "widget": "slider"
         }
       ]
     }
