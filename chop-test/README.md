@@ -5,42 +5,25 @@ Two small plugins that answer the technical questions behind GENRA CHOP on the M
 
 ## CHOP TEST (instrument, track 1)
 
-Pages (function keys): **BROWSER**, **TEST**, **CHORDS**, **WAVE**, **SETUP**.
+Three hand-made screen pages (`tools/build_skin.py`, images in `CHOP TEST/skin-extra/`), all operated by tapping:
 
-**BROWSER** (a hand-made skin page, `tools/add_browser.py`, images in `CHOP TEST/skin-extra/`): the path at the top,
-ten rows to tap (a folder `[name]` opens, a `.wav` loads; the loaded one is marked `< geladen`), **ZURÜCK** (one level
-up), **LAUFWERKE** (the drive list), **< SEITE / SEITE >** for long folders. After every change the plugin nudges the
-row texts and tells the MPC (audioMasterAutomate, audioMasterUpdateDisplay) so the screen redraws.
+- **BROWSER**: the path at the top, ten rows (tap a `[folder]` to open it, a WAV to load it; the loaded one starts
+  with `>`), **ZURÜCK** (one level up), **LAUFWERKE** (the drive list, `(alle Mounts)` at the end), **< SEITE / SEITE >**,
+  and **LISTE**: touch it, then the data wheel scrolls the list one row per click (also on Q-Link 13).
+- **PADS**: sample, key, tempo (the sample's / the MPC's) and chop count at the top; the 16 pads of the current bank
+  laid out like the MPC's (1-4 at the bottom) with chop number and chord, lit while they play, tap to play;
+  **MODUS** (Transient / Equal), **CHOPS** (4-64, cuts again when the knob rests), **PITCH**, **VOLUME** (also on
+  Q-Links 13-16); banks **A-D** (chops 1-16, 17-32, ...); **CHOP SPEICHERN** saves the last played chop as WAV into
+  `CHOP TEST/` next to the sample; the bottom line shows the last note and what it played.
+- **SETUP**: **LERNEN**: tap it, then press pads 1 to 16 in order; the plugin remembers which note each pad sends
+  (in `settings.txt`, for every project). Without it, pad 1 = note 36. Status: pad map, drives, file writing,
+  CHOP LINK, analysis time.
 
-**TEST**, one column per Q-Link column:
-
-| Column | Controls |
-|---|---|
-| Browser | **PATH** (where the browser is), **BROWSE** (endless: one wheel step = one entry; the drives at the top level, then `..`, folders ending in `/`, WAV files), **OPEN** (endless: any turn opens what BROWSE shows; a folder: go in, `..`: go up, a WAV: load it), **GELADEN** (the loaded sample) |
-| Chop | **VOLUME**, **MODE** (Transient / Equal), **CHOPS** (4–64, cuts again when the knob rests), **PITCH** (all chops, ±12 semitones) |
-| Analysis (read only) | **KEY** (with confidence), **TEMPO** (the sample's / the MPC's), **PAD** (last pad, its chord, the MIDI note that came in), **ANALYSE** (load status, number of chops, how long the analysis took) |
-| System (read only) | **LAUFWERKE** (drives found in `/proc/mounts`), **SCHREIBEN** (file write test, result of SAVE CHOP), **LINK** (is a CHOP LINK listening?), **SAVE CHOP** (endless: any turn saves the last played chop as WAV into `CHOP TEST/` next to the sample) |
-
-The browser's last folder is remembered in `settings.txt` (in the plugin's folder) for every project. The drive
-list ends with `(alle Mounts)/`: every mount point of the system, for finding a drive that is not listed.
-All controls are labelled sliders (the MPC showed the SDK's switch widgets without labels).
-
-BROWSE, OPEN and SAVE CHOP act only once a new value has stayed for about 40 ms: the MPC sets a parameter for a
-moment to ask for its text and sets it back, and those probes must not open folders. While turning, BROWSE shows
-the entry it will land on and OPEN what it will open. **DIAGNOSE** on SETUP counts the probes and the real opens.
-
-Play the chops with the pads: pad 1 = MIDI note 36 (C1), pads 1–64 over banks A–D. If the pads are mapped
-differently, change **PAD NOTE** on SETUP (36, 37, 48 or 60); **PAD** on TEST shows the note that arrives.
-Without a loaded WAV a built-in test loop is used, so the pads always sound.
-
-**CHORDS**: the chord of every chop in the current bank (the bank of the last played pad), laid out like the pads
-(1–4 at the bottom). **WAVE**: one bar per chop of the current bank (its level), and the same level as text (`5 ######----`); `>` marks the chops that are playing.
-
-**SETUP**: **UPDATE** chooses how the screen learns about new values: `Text` (the plugin only changes its values;
-the MPC has to re-read them by itself) or `Notify` (the plugin tells the MPC). Try both on WAVE and see which one
-updates live. **PAD NOTE** as above.
-
-The project stores the sample's path; reopening the project loads it again.
+The MPC only re-reads a text when it thinks the value changed: after every change the plugin nudges the text
+parameters and tells the host (audioMasterAutomate, audioMasterUpdateDisplay). Texts are cut after 31 characters
+(the SDK's limit). Buttons act once their new value has stayed for about 40 ms (the MPC probes values to read texts);
+the pads on the screen play at once. Without a loaded WAV a built-in test loop is used. The project stores the
+sample's path and loads it again.
 
 ## CHOP LINK (instrument, another track)
 
@@ -52,13 +35,12 @@ The two plugins share a small memory file (`/dev/shm/genra-chop-link-v1`, or `/t
 
 ## What to report back
 
-- Do both plugins appear under External Plugins and load?
-- LAUFWERKE: is the SSD there? Can ROOT / FOLDER / SAMPLE reach your samples, and does LOAD work?
-- ANALYSE: how many seconds for a typical loop? Are KEY and the chords plausible?
-- SCHREIBEN: `OK`? Does SAVE CHOP write a WAV?
-- LINK: does CHOP LINK say `Link OK` and play along?
-- WAVE: do the bars change with `Text`, with `Notify`, or only after switching pages?
-- CPU meter of the MPC while playing many pads.
+- Do the pads light up when played on the MPC's own pads? Do the chords look plausible?
+- Does tapping a pad on the screen play at once?
+- LERNEN: after pressing pads 1-16, does pad 1 play chop 1?
+- Does the data wheel scroll the browser list (touch LISTE first)?
+- Save the project, reopen it: is the sample back?
+- CHOP SPEICHERN: is the WAV there?
 
 ## Code
 

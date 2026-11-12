@@ -2,29 +2,32 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// What it checks on the device:
-//   * the drives (every mount in /proc/mounts under /nvme, /media, /mnt, ...) can be browsed and WAVs read
-//   * the GENRA CHOP engine (src/Chop.cpp, Core.cpp, Styles.cpp: copied from Camillowup/genra-chop) cuts and
-//     analyses a sample on the MPC's CPU (key, tempo, a chord per chop) and how long that takes
-//   * the plugin may write files (settings.txt in its own folder, a chop as WAV next to the sample)
-//   * two plugins can share data (common/chop_link.h): CHOP LINK on another track follows the pads
-//   * live values on screen (page WAVE: one bar per chop of the current bank) with two update modes
+// Three hand-made screen pages (built by chop-test/tools/build_skin.py):
+//   BROWSER  path, ten rows to tap (folder: open, WAV: load), ZURUECK, LAUFWERKE, page buttons, LISTE (data wheel)
+//   PADS     an info bar, the 16 pads of the current bank (number, chord, lit while playing, tap to play),
+//            MODUS / CHOPS / PITCH / VOLUME, banks A-D, CHOP SPEICHERN, "Zuletzt: ..."
+//   SETUP    LERNEN (teach the plugin which notes the MPC's pads send) and the technical status
 //
-// Signal flow: MIDI note -> pad (note - PAD NOTE) -> one of 8 voices plays that chop of the sample
-//              (linear interpolation, short fades, same pad chokes itself) -> VOLUME -> out 1/2.
+// What it checks on the device: drives and WAVs, the GENRA CHOP engine (src/Chop.cpp, Core.cpp, Styles.cpp, copied
+// from Camillowup/genra-chop) on the MPC's CPU, writing files, sharing data with CHOP LINK (common/chop_link.h) and
+// live screen updates.
 //
-// Threads: process() (audio) only plays what the worker published. A worker thread (started in prepare())
-// scans folders, loads and cuts samples, writes files and prepares the texts the screen shows.
-// formatValue() (UI thread) reads those texts under a mutex; process() never locks.
+// Signal flow: MIDI note -> pad (learned map, or note - 36) -> chop (pad + 16 x bank) -> one of 8 voices
+//              (linear interpolation, short fades, same chop chokes itself) -> VOLUME -> out 1/2.
+//
+// Threads: process() (audio) only plays what the worker published and reads/writes atomics. A worker thread
+// (started in prepare()) browses, loads and cuts samples, writes files and makes the screen texts. The MPC only
+// re-reads a text when it thinks the value changed, so the worker nudges every changed text parameter and tells the
+// host (audioMasterAutomate + audioMasterUpdateDisplay). formatValue() (UI thread) reads the texts under a mutex.
 
 #include "mpc_plugin.h"
 #include "Chop.hpp"
 #include "../../common/chop_link.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
-#include <cctype>
 #include <dirent.h>
 #include <mutex>
 #include <sys/stat.h>
@@ -34,50 +37,53 @@ using namespace mpc;
 
 namespace {
 
+static const int kRows = 10;   // rows of the browser
+static const int kPads = 16;   // pads per bank
+
 enum
 {
-    P_VOLUME = 0, // master volume (parameter 0: the host nudges it on load, harmless)
-    P_PATH,       // read-only: the folder the browser is in
-    P_BROWSE,     // endless: every step moves the browser one entry (drives, "..", folders, WAVs)
-    P_OPEN,       // endless: every turn opens the entry under BROWSE (folder: go in, WAV: load)
-    P_LOADED,     // read-only: the loaded sample
-    P_MODE,       // Transient / Equal
-    P_CHOPS,      // 4..64 chops
-    P_PITCH,      // all chops in semitones
-    P_KEY,        // read-only texts from here ...
-    P_TEMPO,
-    P_PAD,
-    P_ANALYSE,
+    // controls
+    P_VOLUME = 0,                 // master volume (parameter 0: the host nudges it on load, harmless)
+    P_MODE,                       // MODUS: Transient / Equal
+    P_CHOPS,                      // 4..64
+    P_PITCH,                      // all chops, semitones
+    P_BANK,                       // A-D: which 16 chops the pads play
+    P_SAVE,                       // button CHOP SPEICHERN (every tap flips it; a change is a tap)
+    P_LEARN,                      // button LERNEN
+    P_SCROLL,                     // LISTE: endless, one wheel click = one row
+    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, // browser buttons
+    P_PADTAP0,                    // 16 buttons: the pads on the screen
+    P_ROWTAP0 = P_PADTAP0 + kPads,// 10 buttons: the browser rows
+    // texts (read only)
+    P_PATH = P_ROWTAP0 + kRows,
+    P_LISTINFO,                   // "Zeile 3-12 von 24"
+    P_LOADED,                     // the sample's name
+    P_INFOBAR,                    // "F#m  ·  92 BPM  ·  16 Chops  ·  bereit"
+    P_LAST,                       // "Zuletzt: Pad 5, Chop 5, F#m, Note 40"
+    P_PADNUM0,                    // 16: the chop number on each pad ("5")
+    P_PADCHORD0 = P_PADNUM0 + kPads,   // 16: its chord
+    P_PADLIT0 = P_PADCHORD0 + kPads,   // 16: 1 while it plays (film strip frame)
+    P_ROWT0 = P_PADLIT0 + kPads,       // 10: the browser rows
+    P_LEARNINFO = P_ROWT0 + kRows,
+    P_MAPINFO,
     P_DRIVES,
     P_WRITE,
     P_LINK,
-    P_SAVE,       // endless: every turn saves the last played chop as WAV
-    P_UPDATE,     // how the screen learns about new values: Text (polling) / Notify (host notified)
-    P_PADNOTE,    // MIDI note of pad 1
-    P_CHORD0,     // 16 read-only: chords of the current bank
-    P_WAVE0 = P_CHORD0 + 16, // 16 read-only bars: level of each chop of the current bank
-    P_DIAG = P_WAVE0 + 16, // read-only: how often the MPC asked about BROWSE/OPEN with another value vs. real turns
-    // the BROWSER page (a hand-written skin page: rows to tap, buttons)
-    P_ROWT0,                  // 10 read-only: the names in the rows
-    P_ROWB0 = P_ROWT0 + 10,   // 10 buttons: tapping a row (every tap flips the value; any change counts)
-    P_BACK = P_ROWB0 + 10,    // button ZURUECK
-    P_DRVBTN,                 // button LAUFWERKE
-    P_PGUP,                   // button < SEITE
-    P_PGDN,                   // button SEITE >
-    P_PAGEINFO,               // read-only: "Seite 1/3, 24 Eintraege"
+    P_ANALYSE,
+    P_KEYTXT,                     // info bar, split (texts are cut after 31 characters): "Tonart F#m"
+    P_TEMPOTXT,                   // "Sample 92 / MPC 92 BPM"
+    P_CHOPTXT,                    // "16 Chops, Bank A"
     P_COUNT
 };
-static const int kRows = 10;
 
 static const int kVoices = 8;
 static const int kFadeIn = 32;
 static const int kFadeOut = 96;
-static const int kPadNotes[] = {36, 37, 48, 60};
 
 struct Voice
 {
     bool active = false;
-    int pad = -1;
+    int chop = -1;
     double pos = 0.0, end = 0.0, rate = 1.0;
     float gain = 1.f;
     int age = 0;          // samples since start (fade in)
@@ -118,7 +124,7 @@ bool lessNoCase(const std::string& a, const std::string& b)
     return a.size() < b.size();
 }
 
-// Entries of a folder: sub folders or .wav files (no hidden entries).
+// Entries of a folder: sub folders or .wav files (no hidden entries, no Windows system folders).
 std::vector<std::string> listDir(const std::string& dir, bool wantDirs)
 {
     std::vector<std::string> out;
@@ -127,7 +133,7 @@ std::vector<std::string> listDir(const std::string& dir, bool wantDirs)
     while (dirent* e = ::readdir(d))
     {
         std::string n = e->d_name;
-        if (n.empty() || n[0] == '.' || n[0] == '$') continue; // hidden, $RECYCLE.BIN ...
+        if (n.empty() || n[0] == '.' || n[0] == '$') continue;
         std::string full = dir + "/" + n;
         bool dirp = isDir(full);
         if (wantDirs && dirp)
@@ -153,7 +159,54 @@ bool writeFileBytes(const std::string& path, const void* data, size_t n)
     return ok;
 }
 
-// A built-in test loop (2 bars at 92 BPM, F#m7 / Bm9 stabs with a kick and hats), so the pads sound even
+// "/nvme/Samples" -> "SSD/Samples", "/media/Archive/x" -> "Archive/x"
+std::string pathLabel(const std::string& p)
+{
+    if (p == "*") return "(alle Mounts)";
+    if (p.compare(0, 5, "/nvme") == 0) return "SSD" + p.substr(5);
+    for (const char* pre : {"/media/", "/mnt/", "/run/media/"})
+    {
+        size_t n = std::strlen(pre);
+        if (p.compare(0, n, pre) == 0) return p.substr(n);
+    }
+    return p;
+}
+
+// Every mount point that can hold samples (from /proc/mounts); all = every mount except /, /proc, /sys, /dev.
+std::vector<std::string> findDrives(bool all)
+{
+    std::vector<std::string> out;
+    if (const char* env = std::getenv("CHOP_TEST_DRIVE")) if (isDir(env)) out.push_back(env); // tests on a computer
+    std::string t;
+    if (mpc::readTextFile("/proc/mounts", t))
+    {
+        size_t pos = 0;
+        while (pos < t.size())
+        {
+            size_t e = t.find('\n', pos);
+            std::string line = t.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+            pos = e == std::string::npos ? t.size() : e + 1;
+            size_t a = line.find(' ');
+            if (a == std::string::npos) continue;
+            size_t b = line.find(' ', a + 1);
+            std::string mnt = line.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+            std::string m; // /proc/mounts writes a space as \040
+            for (size_t i = 0; i < mnt.size(); ++i)
+            {
+                if (mnt[i] == '\\' && i + 3 < mnt.size()) { m += (char)std::strtol(mnt.substr(i + 1, 3).c_str(), nullptr, 8); i += 3; }
+                else m += mnt[i];
+            }
+            bool keep = all ? (m != "/" && m.compare(0, 5, "/proc") != 0 && m.compare(0, 4, "/sys") != 0 && m.compare(0, 4, "/dev") != 0)
+                            : (m == "/nvme" || (m.size() > 7 && m.compare(0, 7, "/media/") == 0) || (m.size() > 5 && m.compare(0, 5, "/mnt/") == 0)
+                               || (m.size() > 11 && m.compare(0, 11, "/run/media/") == 0));
+            if (keep && isDir(m) && std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m);
+        }
+    }
+    if (!all && isDir("/nvme") && std::find(out.begin(), out.end(), std::string("/nvme")) == out.end()) out.insert(out.begin(), "/nvme");
+    return out;
+}
+
+// A built-in test loop (2 bars at 92 BPM, F#m7 / Bm7 stabs with a kick and hats), so the pads sound even
 // when no WAV could be found.
 hh::SampleData makeBuiltinLoop()
 {
@@ -165,12 +218,11 @@ hh::SampleData makeBuiltinLoop()
     s.R.assign(n, 0.f);
     s.sampleRate = sr;
     s.name = "Testloop (eingebaut)";
-    const float chords[2][4] = {{54, 57, 61, 64}, {59, 62, 66, 69}}; // F#m7, Bm7 (+9 below)
+    const float chords[2][4] = {{54, 57, 61, 64}, {59, 62, 66, 69}};
     uint32_t rng = 12345;
     for (int b = 0; b < 8; ++b)
     {
         size_t at = (size_t)b * beat;
-        // kick on 1 and 3 of each bar
         if (b % 2 == 0)
             for (size_t i = 0; i < beat / 2 && at + i < n; ++i)
             {
@@ -178,7 +230,6 @@ hh::SampleData makeBuiltinLoop()
                 float v = 0.9f * std::sin(2.f * 3.14159265f * (50.f + 80.f * std::exp(-t * 30.f)) * t) * std::exp(-t * 9.f);
                 s.L[at + i] += v; s.R[at + i] += v;
             }
-        // chord stab on every beat
         const float* c = chords[(b / 4) % 2];
         for (size_t i = 0; i < beat * 3 / 4 && at + i < n; ++i)
         {
@@ -190,7 +241,6 @@ hh::SampleData makeBuiltinLoop()
             }
             s.L[at + i] += v * env; s.R[at + i] += v * env * 0.9f;
         }
-        // hats on the off beats
         size_t h = at + beat / 2;
         for (size_t i = 0; i < 2000 && h + i < n; ++i)
         {
@@ -202,6 +252,16 @@ hh::SampleData makeBuiltinLoop()
     return s;
 }
 
+std::string chordText(const hh::SampleInfo& info, int chop)
+{
+    if (chop < 0 || chop >= info.count) return std::string();
+    hh::Chord ch = hh::padChord(info, nullptr, chop);
+    if (!ch.valid()) return "HIT";
+    char c[16];
+    hh::chordName(ch, c, sizeof c);
+    return c;
+}
+
 } // namespace
 
 class ChopTest : public Plugin
@@ -210,64 +270,42 @@ public:
     ChopTest() : Plugin(makeInfo())
     {
         addParam(floatParam("volume", "VOLUME", -40.f, 6.f, 0.f, "dB", 1));
-        addText("path", "PATH");
-        addParam(intParam("browse", "BROWSE", 0, 1000, 500));
-        addParam(intParam("open", "OPEN", 0, 1000, 500));
-        addText("loaded", "GELADEN");
-        addParam(choiceParam("mode", "MODE", {"Transient", "Equal"}, 0));
+        addParam(choiceParam("mode", "MODUS", {"Transient", "Equal"}, 0));
         addParam(intParam("chops", "CHOPS", 4, 64, 16));
         addParam(intParam("pitch", "PITCH", -12, 12, 0, "st"));
-        addText("key", "KEY");
-        addText("tempo", "TEMPO");
-        addText("pad", "PAD");
-        addText("analyse", "ANALYSE");
-        addText("drives", "LAUFWERKE");
+        addParam(choiceParam("bank", "BANK", {"A", "B", "C", "D"}, 0));
+        addButton("save", "CHOP SPEICHERN");
+        addButton("learn", "LERNEN");
+        addParam(intParam("scroll", "LISTE", 0, 1000, 500));
+        addButton("back", "ZURUECK");
+        addButton("drvbtn", "LAUFWERKE");
+        addButton("pgup", "SEITE ZURUECK");
+        addButton("pgdn", "SEITE VOR");
+        for (int i = 0; i < kPads; ++i) addButton(("padtap" + std::to_string(i + 1)).c_str(), ("PAD " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kRows; ++i) addButton(("rowtap" + std::to_string(i + 1)).c_str(), ("TIPP " + std::to_string(i + 1)).c_str());
+        addText("path", "PFAD");
+        addText("listinfo", "LISTINFO");
+        addText("loaded", "GELADEN");
+        addText("infobar", "INFO");
+        addText("last", "ZULETZT");
+        for (int i = 0; i < kPads; ++i) addText(("padnum" + std::to_string(i + 1)).c_str(), ("NUMMER " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kPads; ++i) addText(("padchord" + std::to_string(i + 1)).c_str(), ("AKKORD " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kPads; ++i) addText(("padlit" + std::to_string(i + 1)).c_str(), ("LICHT " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kRows; ++i) addText(("rowt" + std::to_string(i + 1)).c_str(), ("ZEILE " + std::to_string(i + 1)).c_str());
+        addText("learninfo", "LERNINFO");
+        addText("mapinfo", "BELEGUNG");
+        addText("drives", "LAUFWERKSLISTE");
         addText("write", "SCHREIBEN");
-        addText("link", "LINK");
-        addParam(intParam("save", "SAVE CHOP", 0, 1000, 500));
-        addParam(choiceParam("update", "UPDATE", {"Text", "Notify"}, 0));
-        addParam(choiceParam("padnote", "PAD NOTE", {"36 (C1)", "37 (C#1)", "48 (C2)", "60 (C3)"}, 0));
-        for (int i = 0; i < 16; ++i)
-        {
-            char id[16], nm[16];
-            std::snprintf(id, sizeof id, "chord%d", i + 1);
-            std::snprintf(nm, sizeof nm, "AKKORD %d", i + 1);
-            addText(id, nm);
-        }
-        for (int i = 0; i < 16; ++i)
-        {
-            char id[16], nm[16];
-            std::snprintf(id, sizeof id, "wave%d", i + 1);
-            std::snprintf(nm, sizeof nm, "CHOP %d", i + 1);
-            addText(id, nm);
-        }
-        addText("diag", "DIAGNOSE");
-        for (int i = 0; i < kRows; ++i)
-        {
-            char id[16], nm[16];
-            std::snprintf(id, sizeof id, "rowt%d", i + 1);
-            std::snprintf(nm, sizeof nm, "ZEILE %d", i + 1);
-            addText(id, nm);
-        }
-        for (int i = 0; i < kRows; ++i)
-        {
-            char id[16], nm[16];
-            std::snprintf(id, sizeof id, "rowb%d", i + 1);
-            std::snprintf(nm, sizeof nm, "TIPP %d", i + 1);
-            addParam(boolParam(id, nm, false));
-        }
-        addParam(boolParam("back", "ZURUECK", false));
-        addParam(boolParam("drvbtn", "LAUFWERKE BTN", false));
-        addParam(boolParam("pgup", "SEITE ZURUECK", false));
-        addParam(boolParam("pgdn", "SEITE VOR", false));
-        addText("pageinfo", "SEITE");
-        for (int i = 0; i < P_COUNT; ++i) texts_.push_back(std::string());
-        seenBrowse_ = getInt(P_BROWSE);
-        seenOpen_ = getInt(P_OPEN);
-        seenSave_ = getInt(P_SAVE);
-        prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
-        for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_ROWB0 + i);
+        addText("link", "CHOP LINK");
+        addText("analyse", "ANALYSE");
+        addText("keytxt", "TONART");
+        addText("tempotxt", "TEMPO");
+        addText("choptxt", "CHOPINFO");
+        texts_.assign(P_COUNT, std::string());
+        shown_.assign(P_COUNT, std::string("\x01"));
         for (auto& r : retired_) r.store(nullptr);
+        for (auto& n : noteToPad_) n.store(-1);
+        resyncButtons();
     }
 
     ~ChopTest() override
@@ -285,7 +323,7 @@ public:
         i.name = "CHOP TEST";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 't');
-        i.version = 4000;
+        i.version = 5000;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -300,8 +338,8 @@ public:
         {
             started_ = true;
             linkOk_ = link_.open();
-            // the built-in loop right away, so the pads sound from the first block on
-            src_ = makeBuiltinLoop();
+            loadPadMap();
+            src_ = makeBuiltinLoop();   // the pads sound from the first block on
             cutAndPublish();
             worker_ = std::thread([this] { workerMain(); });
         }
@@ -311,12 +349,12 @@ public:
     {
         for (Voice& v : voices_) v.active = false;
         gainSmooth_ = -1.f;
+        for (int k = 0; k < kPads; ++k) padTapSeen_[k] = getInt(P_PADTAP0 + k);
     }
 
     // ------------------------------------------------------------------ audio
     void process(ProcessContext& ctx) override
     {
-        // a new chop set from the worker? (all voices stop: they belong to the old one)
         if (hh::ChopSet* n = pending_.exchange(nullptr, std::memory_order_acq_rel))
         {
             for (Voice& v : voices_) v.active = false;
@@ -332,11 +370,23 @@ public:
         }
         if (ctx.transport.tempoValid) hostBpmX100_.store((int)std::lround(ctx.transport.bpm * 100.0), std::memory_order_relaxed);
 
-        const int padBase = kPadNotes[clamp(getInt(P_PADNOTE), 0, 3)];
         const float pitch = (float)getInt(P_PITCH);
+        const int bank = clamp(getInt(P_BANK), 0, 3);
+
+        // pads tapped on the screen (button parameters flip on every tap)
+        for (int k = 0; k < kPads; ++k)
+        {
+            int v = getInt(P_PADTAP0 + k);
+            if (v != padTapSeen_[k])
+            {
+                padTapSeen_[k] = v;
+                lastNote_.store(-1, std::memory_order_relaxed);
+                playPad(k, bank, 0.8f, pitch);
+            }
+        }
+
         float target = std::pow(10.f, get(P_VOLUME) / 20.f);
         if (gainSmooth_ < 0.f) gainSmooth_ = target;
-
         float* outL = ctx.outputs[0];
         float* outR = ctx.numOutputs > 1 ? ctx.outputs[1] : nullptr;
         int ev = 0;
@@ -345,12 +395,7 @@ public:
             while (ev < ctx.numMidiEvents && ctx.midi[ev].sampleOffset <= i)
             {
                 const MidiEvent& e = ctx.midi[ev++];
-                if (e.isNoteOn())
-                {
-                    lastNote_.store(e.note(), std::memory_order_relaxed);
-                    int pad = e.note() - padBase;
-                    if (cur_ && pad >= 0 && pad < cur_->info.count) startVoice(pad, e.velocity() / 127.f, pitch);
-                }
+                if (e.isNoteOn()) noteOn(e.note(), e.velocity() / 127.f, bank, pitch);
                 else if (e.isAllNotesOff())
                     for (Voice& v : voices_) if (v.active && v.release < 0) v.release = kFadeOut;
             }
@@ -386,7 +431,7 @@ public:
             if (outR) outR[i] = r * gainSmooth_;
         }
         uint64_t mask = 0;
-        for (const Voice& v : voices_) if (v.active && v.pad >= 0 && v.pad < 64) mask |= (uint64_t)1 << v.pad;
+        for (const Voice& v : voices_) if (v.active && v.chop >= 0 && v.chop < 64) mask |= (uint64_t)1 << v.chop;
         playingMask_.store(mask, std::memory_order_relaxed);
     }
 
@@ -405,80 +450,76 @@ public:
         if (s.compare(0, 3, "v1\n") == 0) s = s.substr(3);
         requestedPath_ = s;
         pathRequest_ = !s.empty();
-        // the endless controls were set by the project: that is no turn of the user
-        seenBrowse_ = getInt(P_BROWSE);
-        seenOpen_ = getInt(P_OPEN);
-        seenSave_ = getInt(P_SAVE);
-        prevBrowse_ = seenBrowse_; prevOpen_ = seenOpen_; prevSave_ = seenSave_;
-        for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_ROWB0 + i);
+        resyncButtons(); // the buttons were set by the project: that is no tap
     }
 
     // ------------------------------------------------------------------ screen texts (UI thread)
-    bool formatValue(int index, float plain, std::string& out) override
+    bool formatValue(int index, float, std::string& out) override
     {
-        (void)plain;
+        if (index == P_SCROLL) { std::lock_guard<std::mutex> g(mtx_); out = texts_[P_LISTINFO]; return true; }
+        if (index < P_PATH) return false;
         std::lock_guard<std::mutex> g(mtx_);
-        // the endless controls act here too, so the text the MPC reads right after a turn is already the new one
-        // BROWSE / OPEN: only a preview here. The MPC sets a value for a moment to ask for its text and sets it back;
-        // that must not count as a turn. The worker acts once a new value has stayed (see stableTurn).
-        if (index == P_BROWSE)
-        {
-            if (getInt(P_BROWSE) != seenBrowse_) ++asked_;
-            out = browseTextLocked(previewCursorLocked());
-            return true;
-        }
-        if (index == P_OPEN)
-        {
-            if (getInt(P_OPEN) != seenOpen_) ++asked_;
-            int c = previewCursorLocked();
-            out = entries_.empty() ? std::string("(leer)") : "oeffnen: " + entries_[(size_t)c].label;
-            return true;
-        }
-        if (index == P_SAVE)   { out = saveRequested_ ? std::string("sichert ...") : std::string("drehen = sichern"); return true; }
-        if (index == P_PATH)   { out = cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_); return true; }
-        if (index >= P_ROWT0 && index < P_ROWT0 + kRows) { out = rowTextLocked(index - P_ROWT0); return true; }
-        if (index == P_PAGEINFO)
-        {
-            char b[48];
-            int pages = std::max(1, ((int)entries_.size() + kRows - 1) / kRows);
-            std::snprintf(b, sizeof b, "Seite %d/%d, %d Eintraege", page_ + 1, pages, (int)entries_.size());
-            out = b;
-            return true;
-        }
-        if (isText(index)) { out = texts_[(size_t)index]; return true; }
-        return false;
+        out = texts_[(size_t)index];
+        return true;
     }
 
 private:
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ parameters
     void addText(const char* id, const char* name)
     {
         Param p = floatParam(id, name, 0.f, 1.f, 0.f);
         p.automatable = false;
-        textParams_.push_back(addParam(p));
+        addParam(p);
     }
-    bool isText(int index) const
+    void addButton(const char* id, const char* name) { addParam(boolParam(id, name, false)); }
+
+    static const int kButtons = P_PATH - P_SAVE; // every button and LISTE: changes are checked by the worker
+    void resyncButtons()
     {
-        return std::find(textParams_.begin(), textParams_.end(), index) != textParams_.end();
+        for (int i = 0; i < kButtons; ++i) btnSeen_[i] = btnPrev_[i] = getInt(P_SAVE + i);
     }
 
-    // "/nvme/Samples" -> "SSD/Samples", "/media/Archive/x" -> "Archive/x"
-    static std::string pathLabel(const std::string& p)
+    // ------------------------------------------------------------------ audio helpers
+    // MIDI note -> pad: the learned map, else note - 36 (pads 1..64 without banks)
+    void noteOn(int note, float vel, int bank, float pitch)
     {
-        if (p == "*") return "(alle Mounts)";
-        if (p.compare(0, 5, "/nvme") == 0) return "SSD" + p.substr(5);
-        for (const char* pre : {"/media/", "/mnt/", "/run/media/"})
+        lastNote_.store(note, std::memory_order_relaxed);
+        if (learning_.load(std::memory_order_acquire))
         {
-            size_t n = std::strlen(pre);
-            if (p.compare(0, n, pre) == 0) return p.substr(n);
+            int step = learnStep_.load(std::memory_order_relaxed);
+            if (step < kPads)
+            {
+                bool used = false;
+                for (int k = 0; k < step; ++k) if (learnNotes_[k].load(std::memory_order_relaxed) == note) used = true;
+                if (!used)
+                {
+                    learnNotes_[step].store(note, std::memory_order_relaxed);
+                    learnStep_.store(step + 1, std::memory_order_release);
+                }
+            }
+            return; // no sound while learning
         }
-        return p;
+        int pad = noteToPad_[note & 127].load(std::memory_order_relaxed);
+        if (pad >= 0) { playPad(pad, bank, vel, pitch); return; }
+        if (!mapLearned_.load(std::memory_order_relaxed))
+        {
+            int chop = note - 36;
+            if (chop >= 0 && chop < 64) startVoice(chop, vel, pitch, chop % kPads);
+            else lastChop_.store(-2, std::memory_order_relaxed); // a note that plays nothing
+        }
+        else
+            lastChop_.store(-2, std::memory_order_relaxed);
     }
 
-    void startVoice(int pad, float vel, float pitch)
+    void playPad(int pad, int bank, float vel, float pitch) { startVoice(pad + kPads * bank, vel, pitch, pad); }
+
+    void startVoice(int chop, float vel, float pitch, int pad)
     {
-        // the same pad cuts itself off (fade), like a mono pad on the MPC
-        for (Voice& v : voices_) if (v.active && v.pad == pad && v.release < 0) v.release = kFadeOut / 2;
+        lastPad_.store(pad, std::memory_order_relaxed);
+        if (!cur_ || chop >= cur_->info.count) { lastChop_.store(-1 - 1000 - chop, std::memory_order_relaxed); return; }
+        lastChop_.store(chop, std::memory_order_relaxed);
+        lastPlayed_.store(chop, std::memory_order_relaxed);
+        for (Voice& v : voices_) if (v.active && v.chop == chop && v.release < 0) v.release = kFadeOut / 2;
         Voice* slot = nullptr;
         for (Voice& v : voices_) if (!v.active) { slot = &v; break; }
         if (!slot)
@@ -487,18 +528,17 @@ private:
             for (Voice& v : voices_) if (v.age > slot->age) slot = &v;
         }
         slot->active = true;
-        slot->pad = pad;
-        slot->pos = (double)cur_->start[pad];
-        slot->end = (double)cur_->end[pad];
+        slot->chop = chop;
+        slot->pos = (double)cur_->start[chop];
+        slot->end = (double)cur_->end[chop];
         slot->rate = (double)cur_->data.sampleRate / sr_ * std::pow(2.0, pitch / 12.0);
         slot->gain = 0.6f * (0.2f + 0.8f * vel);
         slot->age = 0;
         slot->release = -1;
-        lastPad_.store(pad, std::memory_order_relaxed);
         hitCount_.fetch_add(1, std::memory_order_relaxed);
         if (choplink::LinkData* L = link_.data())
         {
-            L->lastPad.store(pad, std::memory_order_relaxed);
+            L->lastPad.store(chop, std::memory_order_relaxed);
             L->trigCount.fetch_add(1, std::memory_order_release);
         }
     }
@@ -510,104 +550,69 @@ private:
             hh::ChopSet* expected = nullptr;
             if (r.compare_exchange_strong(expected, s)) return;
         }
-        // all slots full (worker is far behind): leak rather than free on the audio thread
     }
 
-    // ------------------------------------------------------------------ worker thread
-    void setText(int index, const std::string& s)
+    // ------------------------------------------------------------------ worker: texts
+    // The SDK hands the MPC at most 31 characters per text: cut longer ones (paths keep their end).
+    static std::string fit(const std::string& s, bool keepEnd = false)
+    {
+        if (s.size() <= 31) return s;
+        return keepEnd ? "..." + s.substr(s.size() - 28) : s.substr(0, 30) + "~";
+    }
+    void setText(int index, const std::string& s, bool keepEnd = false)
     {
         std::lock_guard<std::mutex> g(mtx_);
-        if (texts_[(size_t)index] != s) { texts_[(size_t)index] = s; textsDirty_ = true; }
+        texts_[(size_t)index] = fit(s, keepEnd);
     }
 
-    // ---- the browser (its state is shared with the UI thread: mtx_ held by the callers of *Locked) ----
+    // The MPC re-reads a text only when it thinks the value changed: nudge every changed text parameter, tell the host,
+    // and ask for a redraw. The PADLIT parameters carry real values (0/1: the frame of the pad's film strip).
+    void pushScreen()
+    {
+        bool any = false;
+        for (int i = P_PATH; i < P_COUNT; ++i)
+        {
+            std::string now;
+            {
+                std::lock_guard<std::mutex> g(mtx_);
+                now = texts_[(size_t)i];
+            }
+            if (now == shown_[(size_t)i]) continue;
+            shown_[(size_t)i] = now;
+            if (i >= P_PADLIT0 && i < P_PADLIT0 + kPads) setNormalised(i, now == "1" ? 1.f : 0.f);
+            else setNormalised(i, getNormalised(i) > 0.5f ? 0.f : 1.f);
+            notifyHostParameterChanged(i);
+            any = true;
+        }
+        if (any) requestDisplayUpdate();
+    }
+
+    // ------------------------------------------------------------------ worker: the browser
     struct Entry { std::string label, path; int kind; }; // kind: 0 up, 1 folder, 2 wav, 3 drive
 
-    // Every mount point that can hold samples: /nvme, /media/*, /mnt/*, /run/media/*/* (from /proc/mounts).
-    static std::vector<std::string> findDrives(bool all)
-    {
-        std::vector<std::string> out;
-        if (const char* env = std::getenv("CHOP_TEST_DRIVE")) if (isDir(env)) out.push_back(env); // tests on a computer
-        std::string t;
-        if (mpc::readTextFile("/proc/mounts", t))
-        {
-            size_t pos = 0;
-            while (pos < t.size())
-            {
-                size_t e = t.find('\n', pos);
-                std::string line = t.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
-                pos = e == std::string::npos ? t.size() : e + 1;
-                size_t a = line.find(' ');
-                if (a == std::string::npos) continue;
-                size_t b = line.find(' ', a + 1);
-                std::string mnt = line.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
-                // /proc/mounts writes a space as \040
-                std::string m;
-                for (size_t i = 0; i < mnt.size(); ++i)
-                {
-                    if (mnt[i] == '\\' && i + 3 < mnt.size()) { m += (char)std::strtol(mnt.substr(i + 1, 3).c_str(), nullptr, 8); i += 3; }
-                    else m += mnt[i];
-                }
-                bool keep = all ? (m != "/" && m.compare(0, 5, "/proc") != 0 && m.compare(0, 4, "/sys") != 0 && m.compare(0, 4, "/dev") != 0)
-                                : (m == "/nvme" || (m.size() > 7 && m.compare(0, 7, "/media/") == 0) || (m.size() > 5 && m.compare(0, 5, "/mnt/") == 0)
-                                   || (m.size() > 11 && m.compare(0, 11, "/run/media/") == 0));
-                if (keep && isDir(m) && std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m);
-            }
-        }
-        if (!all && isDir("/nvme") && std::find(out.begin(), out.end(), std::string("/nvme")) == out.end()) out.insert(out.begin(), "/nvme");
-        return out;
-    }
-
-    // Fills entries_ for cwd_ ("" = the drives, "*" = every mount). Keeps the cursor on `select` if given.
-    void listLocked(const std::string& select = std::string())
+    void listDirNow(const std::string& select = std::string())
     {
         entries_.clear();
         if (cwd_.empty() || cwd_ == "*")
         {
-            for (const std::string& d : findDrives(cwd_ == "*")) entries_.push_back({pathLabel(d) + "/", d, 3});
-            if (cwd_.empty()) entries_.push_back({"(alle Mounts)/", "*", 1});
-            else entries_.insert(entries_.begin(), {"..", "", 0});
+            if (cwd_ == "*") entries_.push_back({"..", "", 0});
+            for (const std::string& d : findDrives(cwd_ == "*")) entries_.push_back({pathLabel(d), d, 3});
+            if (cwd_.empty()) entries_.push_back({"(alle Mounts)", "*", 1});
         }
         else
         {
             entries_.push_back({"..", "", 0});
-            for (const std::string& n : listDir(cwd_, true)) entries_.push_back({n + "/", cwd_ + "/" + n, 1});
-            for (const std::string& n : listDir(cwd_, false)) entries_.push_back({stripWav(n), cwd_ + "/" + n, 2});
+            for (const std::string& n : listDir(cwd_, true)) entries_.push_back({n, cwd_ + "/" + n, 1});
+            for (const std::string& n : listDir(cwd_, false)) entries_.push_back({n, cwd_ + "/" + n, 2});
         }
-        cursor_ = 0;
+        top_ = 0;
         if (!select.empty())
-            for (size_t i = 0; i < entries_.size(); ++i) if (entries_[i].path == select) { cursor_ = (int)i; break; }
-        if (cursor_ == 0 && entries_.size() > 1 && entries_[0].kind == 0) cursor_ = 1; // start on the first real entry
-        page_ = cursor_ / kRows;
-        textsDirty_ = true;
-        browserDirty_ = true;
+            for (size_t i = 0; i < entries_.size(); ++i)
+                if (entries_[i].path == select) { top_ = std::max(0, (int)i - kRows / 2); break; }
+        clampTop();
     }
 
-    // BROWSE is endless: only the change since the last look counts (one wheel step = one entry).
-    static int stepOf(int d) { return d == 0 ? 0 : d > 0 ? 1 + (d - 1) / 6 : -1 - (-d - 1) / 6; } // a wheel click = one entry
-    int previewCursorLocked() const
-    {
-        if (entries_.empty()) return 0;
-        return clamp(cursor_ + stepOf(getInt(P_BROWSE) - seenBrowse_), 0, (int)entries_.size() - 1);
-    }
-    void stepBrowserLocked(int v)
-    {
-        int d = v - seenBrowse_;
-        seenBrowse_ = v;
-        if (d == 0 || entries_.empty()) return;
-        cursor_ = clamp(cursor_ + stepOf(d), 0, (int)entries_.size() - 1);
-        textsDirty_ = true;
-    }
-
-    std::string browseTextLocked(int cur) const
-    {
-        if (entries_.empty()) return "(leer)";
-        char buf[16];
-        std::snprintf(buf, sizeof buf, "  %d/%d", cur + 1, (int)entries_.size());
-        std::string label = entries_[(size_t)cur].label;
-        if (label.size() > 22) label = label.substr(0, 21) + "~";
-        return label + buf;
-    }
+    void clampTop() { top_ = clamp(top_, 0, std::max(0, (int)entries_.size() - kRows)); }
 
     std::string parentOf(const std::string& p) const
     {
@@ -616,124 +621,96 @@ private:
         return i == std::string::npos || i == 0 ? std::string() : p.substr(0, i);
     }
 
-    // ---- the BROWSER page ----
-    std::string rowTextLocked(int row) const
-    {
-        size_t i = (size_t)(page_ * kRows + row);
-        if (i >= entries_.size()) return std::string();
-        const Entry& e = entries_[i];
-        if (e.kind == 0) return "..  (zurueck)";
-        if (e.kind == 1 || e.kind == 3) return "[" + e.label.substr(0, e.label.size() - 1) + "]";
-        std::string mark = (!loadedPath_.empty() && e.path == loadedPath_) ? "   < geladen" : "";
-        return e.label + ".wav" + mark;
-    }
-
-    void goUpLocked()
+    void goUp()
     {
         if (cwd_.empty()) return;
         std::string from = cwd_;
         cwd_ = cwd_ == "*" ? std::string() : parentOf(cwd_);
-        listLocked(from);
-        if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
+        listDirNow(from);
+        rememberDir();
     }
 
-    void tapRowLocked(int row)
+    void rememberDir() { if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; } }
+
+    void tapRow(int row)
     {
-        int i = page_ * kRows + row;
+        int i = top_ + row;
         if (i < 0 || i >= (int)entries_.size()) return;
-        cursor_ = i;
         const Entry e = entries_[(size_t)i];
-        ++opened_;
-        if (e.kind == 0) goUpLocked();
-        else if (e.kind == 1 || e.kind == 3)
-        {
-            cwd_ = e.path;
-            listLocked();
-            if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
-        }
-        else { requestedPath_ = e.path; pathRequest_ = true; }
-        browserDirty_ = true;
+        if (e.kind == 0) goUp();
+        else if (e.kind == 1 || e.kind == 3) { cwd_ = e.path; listDirNow(); rememberDir(); }
+        else if (loadPath(e.path)) cutAndPublish();
     }
 
-    // OPEN is endless too: any turn opens what BROWSE shows.
-    void openLocked(int v)
+    void browserTexts()
     {
-        if (v == seenOpen_) return;
-        seenOpen_ = v;
-        ++opened_;
-        if (entries_.empty()) return;
-        const Entry e = entries_[(size_t)cursor_];
-        if (e.kind == 0) { std::string from = cwd_; cwd_ = cwd_ == "*" ? std::string() : parentOf(cwd_); listLocked(from); }
-        else if (e.kind == 1 || e.kind == 3) { cwd_ = e.path; listLocked(); }
-        else { requestedPath_ = e.path; pathRequest_ = true; }
-        if (cwd_ != "*") { lastDir_ = cwd_; lastDirDirty_ = true; }
+        std::string loaded;
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            loaded = loadedPath_;
+        }
+        for (int r = 0; r < kRows; ++r)
+        {
+            size_t i = (size_t)(top_ + r);
+            std::string t;
+            if (i < entries_.size())
+            {
+                const Entry& e = entries_[i];
+                if (e.kind == 0) t = "..  (zurueck)";
+                else if (e.kind == 1 || e.kind == 3) t = "[" + e.label + "]";
+                else t = ((!loaded.empty() && e.path == loaded) ? "> " : "") + e.label;
+            }
+            setText(P_ROWT0 + r, t);
+        }
+        setText(P_PATH, cwd_.empty() ? std::string("Laufwerke") : pathLabel(cwd_), true);
+        char b[64];
+        int n = (int)entries_.size();
+        if (n == 0) std::snprintf(b, sizeof b, "leer");
+        else std::snprintf(b, sizeof b, "Zeile %d-%d von %d", top_ + 1, std::min(n, top_ + kRows), n);
+        setText(P_LISTINFO, b);
     }
 
-    // LOAD's switch shows On/Off (the MPC needs a real on/off there); what loading does is shown in ANALYSE
-    void setLoadText(const std::string& s) { setText(P_ANALYSE, s); }
-
-    // Reads a WAV into src_. Returns false (and shows the error) if it cannot.
+    // ------------------------------------------------------------------ worker: sample, cut, files
     bool loadPath(const std::string& path)
     {
-        setLoadText("laedt ...");
+        setText(P_ANALYSE, "laedt ...");
         std::vector<uint8_t> bytes;
-        if (!mpc::readFile(path, bytes)) { setLoadText("Fehler: nicht lesbar"); return false; }
+        if (!mpc::readFile(path, bytes)) { setText(P_ANALYSE, "Fehler: nicht lesbar"); return false; }
         hh::SampleData d;
         std::string err;
-        if (!hh::readWav(bytes, d, err, 60.f)) { setLoadText("Fehler: " + err); return false; }
+        if (!hh::readWav(bytes, d, err, 60.f)) { setText(P_ANALYSE, "Fehler: " + err); return false; }
         d.path = path;
         d.name = stripWav(baseName(path));
         src_ = std::move(d);
-        {
-            std::lock_guard<std::mutex> g(mtx_);
-            loadedPath_ = path;
-        }
+        std::lock_guard<std::mutex> g(mtx_);
+        loadedPath_ = path;
         return true;
     }
 
-    // Cuts src_ with the current MODE / CHOPS, publishes it to the audio thread and updates the texts.
     void cutAndPublish()
     {
         if (src_.frames() == 0) return;
         auto t0 = std::chrono::steady_clock::now();
         hh::ChopSet* cs = new hh::ChopSet();
         cs->data = src_;
-        int mode = getInt(P_MODE) == 1 ? hh::CM_EQUAL : hh::CM_TRANSIENT;
-        int count = clamp(getInt(P_CHOPS), 4, 64);
-        hh::analyse(*cs, mode, count);
+        hh::analyse(*cs, getInt(P_MODE) == 1 ? hh::CM_EQUAL : hh::CM_TRANSIENT, clamp(getInt(P_CHOPS), 4, 64));
         double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        cutMode_ = getInt(P_MODE);
-        cutCount_ = getInt(P_CHOPS);
 
-        // what the screen and CHOP LINK need, copied before the set goes to the audio thread
         info_ = cs->info;
         sampleBpm_ = cs->bpm;
         for (int p = 0; p < 64; ++p)
         {
-            float pk = 0.f;
-            if (p < cs->info.count)
-                for (size_t i = cs->start[p]; i < cs->end[p] && i < cs->data.L.size(); ++i)
-                    pk = std::max(pk, std::fabs(cs->data.L[i]));
-            chopPeak_[p] = pk;
             chopStart_[p] = p < cs->info.count ? cs->start[p] : 0;
             chopEnd_[p] = p < cs->info.count ? cs->end[p] : 0;
         }
-        float top = 1e-6f;
-        for (int p = 0; p < 64; ++p) top = std::max(top, chopPeak_[p]);
-        for (int p = 0; p < 64; ++p) chopPeak_[p] /= top;
-
-        // hand it over: free what the audio thread gave back, then publish
         for (auto& r : retired_) delete r.exchange(nullptr);
         delete pending_.exchange(cs, std::memory_order_acq_rel);
 
         char buf[64];
-        std::snprintf(buf, sizeof buf, "OK, %d Chops, %.2f s", info_.count, secs);
+        std::snprintf(buf, sizeof buf, "OK, %d Chops in %.2f s", info_.count, secs);
         setText(P_ANALYSE, buf);
-        char k[16];
-        hh::keyName(info_.key, k, sizeof k);
-        std::snprintf(buf, sizeof buf, "%s (%d%%)", k, (int)std::lround(info_.keyConf * 100.f));
-        setText(P_KEY, buf);
         sampleName_ = src_.name;
+        ready_ = true;
 
         if (choplink::LinkData* L = link_.data())
         {
@@ -748,7 +725,6 @@ private:
             }
             link_.writeName(sampleName_);
         }
-        bankShown_ = -1; // redraw chords / bars
     }
 
     void writeTest()
@@ -764,35 +740,61 @@ private:
         setText(P_WRITE, "OK");
     }
 
+    // settings.txt (in the plugin's folder, for every project): the browser's last folder and the learned pad notes
     std::string settingsPath() const
     {
         std::string f = mpc::pluginFolder();
         return f.empty() ? std::string() : f + "/settings.txt";
     }
-
-    // settings.txt remembers the last folder of the browser, for every project
-    void saveSettings(const std::string& dir)
-    {
-        std::string p = settingsPath();
-        if (p.empty()) return;
-        std::string s = "lastdir=" + dir + "\n";
-        setText(P_WRITE, writeFileBytes(p, s.data(), s.size()) ? "OK, Ordner gemerkt" : "Fehler: settings.txt");
-    }
-
-    std::string loadSettingsDir() const
+    std::string settingsValue(const std::string& key) const
     {
         std::string t;
         if (!mpc::readTextFile(settingsPath(), t)) return std::string();
-        size_t i = t.find("lastdir=");
+        size_t i = t.find(key + "=");
         if (i == std::string::npos) return std::string();
         size_t e = t.find('\n', i);
-        return t.substr(i + 8, e == std::string::npos ? std::string::npos : e - i - 8);
+        size_t a = i + key.size() + 1;
+        return t.substr(a, e == std::string::npos ? std::string::npos : e - a);
+    }
+    void saveSettings()
+    {
+        std::string p = settingsPath();
+        if (p.empty()) return;
+        std::string s = "lastdir=" + lastDir_ + "\npadmap=" + padMapString() + "\n";
+        if (!writeFileBytes(p, s.data(), s.size())) setText(P_WRITE, "Fehler: settings.txt");
+    }
+
+    std::string padMapString() const
+    {
+        if (!mapLearned_.load()) return std::string();
+        std::string s;
+        for (int k = 0; k < kPads; ++k)
+            for (int n = 0; n < 128; ++n)
+                if (noteToPad_[n].load() == k) { s += (s.empty() ? "" : ",") + std::to_string(n); break; }
+        return s;
+    }
+
+    void loadPadMap()
+    {
+        std::string m = settingsValue("padmap");
+        std::vector<int> notes;
+        size_t pos = 0;
+        while (pos < m.size())
+        {
+            size_t e = m.find(',', pos);
+            notes.push_back(std::atoi(m.substr(pos, e == std::string::npos ? std::string::npos : e - pos).c_str()));
+            if (e == std::string::npos) break;
+            pos = e + 1;
+        }
+        if ((int)notes.size() != kPads) return;
+        for (int k = 0; k < kPads; ++k) if (notes[(size_t)k] >= 0 && notes[(size_t)k] < 128) noteToPad_[notes[(size_t)k]].store(k);
+        mapLearned_.store(true);
     }
 
     void saveChop()
     {
-        int pad = lastPad_.load();
-        if (pad < 0 || pad >= info_.count || src_.frames() == 0) { setSaveText("erst ein Pad spielen"); return; }
+        int chop = lastPlayed_.load();
+        if (chop < 0 || chop >= info_.count || src_.frames() == 0) { setText(P_WRITE, "erst ein Pad spielen"); return; }
         std::string dir;
         {
             std::lock_guard<std::mutex> g(mtx_);
@@ -801,42 +803,72 @@ private:
         }
         dir += "/CHOP TEST";
         ::mkdir(dir.c_str(), 0777);
-        if (chopEnd_[pad] <= chopStart_[pad]) { setSaveText("Fehler: Pad leer"); return; }
-        std::vector<uint8_t> wav = hh::writeWav(src_, chopStart_[pad], chopEnd_[pad], false, getInt(P_PITCH));
+        if (chopEnd_[chop] <= chopStart_[chop]) { setText(P_WRITE, "Fehler: Chop leer"); return; }
+        std::vector<uint8_t> wav = hh::writeWav(src_, chopStart_[chop], chopEnd_[chop], false, getInt(P_PITCH));
         char name[96];
-        std::snprintf(name, sizeof name, "/%s pad%02d.wav", sampleName_.substr(0, 60).c_str(), pad + 1);
+        std::snprintf(name, sizeof name, "/%s chop%02d.wav", sampleName_.substr(0, 60).c_str(), chop + 1);
         bool ok = writeFileBytes(dir + name, wav.data(), wav.size());
-        setSaveText(ok ? std::string("OK, WAV Pad ") + std::to_string(pad + 1) : std::string("Fehler: WAV"));
+        setText(P_WRITE, ok ? "Chop " + std::to_string(chop + 1) + " gespeichert" : std::string("Fehler: WAV"));
     }
 
-    // likewise SAVE CHOP: the result goes to SCHREIBEN
-    void setSaveText(const std::string& s) { setText(P_WRITE, s); }
-
-    void updateScreen()
+    // ------------------------------------------------------------------ worker: the PADS and SETUP texts
+    void padTexts()
     {
+        const int bank = clamp(getInt(P_BANK), 0, 3);
+        const uint64_t playing = playingMask_.load();
+        for (int k = 0; k < kPads; ++k)
+        {
+            int chop = k + kPads * bank;
+            setText(P_PADNUM0 + k, chop < info_.count ? std::to_string(chop + 1) : std::string("-"));
+            setText(P_PADCHORD0 + k, chordText(info_, chop));
+            setText(P_PADLIT0 + k, ((playing >> chop) & 1u) ? "1" : "0");
+        }
+        char k[16];
+        hh::keyName(info_.key, k, sizeof k);
+        int host = hostBpmX100_.load();
         char buf[64];
-        int pad = lastPad_.load();
-        int note = lastNote_.load();
-        uint64_t playing = playingMask_.load();
+        setText(P_KEYTXT, std::string("Tonart ") + k);
+        std::snprintf(buf, sizeof buf, "Sample %.0f / MPC %.0f BPM", (double)sampleBpm_, host / 100.0);
+        setText(P_TEMPOTXT, buf);
+        std::snprintf(buf, sizeof buf, "%d Chops, Bank %c", info_.count, "ABCD"[bank]);
+        setText(P_CHOPTXT, buf);
+        setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
 
-        // PAD: last pad, its chord, the note that came in
-        if (note < 0) setText(P_PAD, "noch nichts gespielt");
-        else if (pad < 0) { std::snprintf(buf, sizeof buf, "Note %d: kein Pad", note); setText(P_PAD, buf); }
+        int note = lastNote_.load(), pad = lastPad_.load(), chop = lastChop_.load();
+        std::string last;
+        if (note < 0 && pad < 0) last = "noch nichts gespielt";
         else
         {
-            char c[16];
-            hh::Chord ch = hh::padChord(info_, nullptr, pad);
-            if (ch.valid()) hh::chordName(ch, c, sizeof c); else std::snprintf(c, sizeof c, "HIT");
-            std::snprintf(buf, sizeof buf, "%d: %s (Note %d)", pad + 1, c, note);
-            setText(P_PAD, buf);
+            std::string from = note >= 0 ? "Note " + std::to_string(note) : std::string("Touch");
+            if (chop >= 0) last = from + " > Pad " + std::to_string(pad + 1) + " = Chop " + std::to_string(chop + 1) + " " + chordText(info_, chop);
+            else if (chop <= -1000) last = from + " > Chop " + std::to_string(-chop - 1000) + " fehlt";
+            else last = from + " > kein Pad (LERNEN)";
         }
+        setText(P_LAST, last);
+    }
 
-        // TEMPO: the sample's and the MPC's
-        int host = hostBpmX100_.load();
-        std::snprintf(buf, sizeof buf, "Sample %.0f / MPC %.0f", (double)sampleBpm_, host / 100.0);
-        setText(P_TEMPO, buf);
+    void setupTexts()
+    {
+        if (learning_.load())
+        {
+            int step = learnStep_.load();
+            setText(P_LEARNINFO, step < kPads ? "Jetzt Pad " + std::to_string(step + 1) + " druecken ..." : std::string("fertig"));
+        }
+        else
+            setText(P_LEARNINFO, mapLearned_.load() ? std::string("gelernt") : std::string("noch nicht gelernt"));
+        if (mapLearned_.load())
+        {
+            int first = -1;
+            for (int n = 0; n < 128 && first < 0; ++n) if (noteToPad_[n].load() == 0) first = n;
+            setText(P_MAPINFO, "gelernt, Pad 1 = Note " + std::to_string(first));
+        }
+        else
+            setText(P_MAPINFO, "Standard, Pad 1 = Note 36");
 
-        // LINK: is a CHOP LINK reading?
+        std::string names;
+        for (const std::string& d : findDrives(false)) names += (names.empty() ? "" : ", ") + pathLabel(d);
+        setText(P_DRIVES, names.empty() ? std::string("keins gefunden") : names);
+
         choplink::LinkData* L = link_.data();
         if (!L) setText(P_LINK, "Fehler: " + link_.error());
         else
@@ -845,93 +877,64 @@ private:
             auto now = std::chrono::steady_clock::now();
             if (rb != lastReaderBeat_) { lastReaderBeat_ = rb; readerSeen_ = now; readerEver_ = true; }
             bool alive = readerEver_ && now - readerSeen_ < std::chrono::milliseconds(1500);
-            setText(P_LINK, alive ? "CHOP LINK hoert zu" : "kein CHOP LINK");
+            setText(P_LINK, alive ? "hoert zu" : "nicht geladen");
         }
-
-        // the current bank (of the last pad): chords and bars
-        int bank = pad < 0 ? 0 : pad / 16;
-        bool notify = getInt(P_UPDATE) == 1;
-        for (int k = 0; k < 16; ++k)
-        {
-            int p = bank * 16 + k;
-            char c[16];
-            if (p >= info_.count) std::snprintf(c, sizeof c, "-");
-            else
-            {
-                hh::Chord ch = hh::padChord(info_, nullptr, p);
-                if (ch.valid()) hh::chordName(ch, c, sizeof c); else std::snprintf(c, sizeof c, "HIT");
-            }
-            std::snprintf(buf, sizeof buf, "%c%d  %s", "ABCD"[bank], k + 1, c);
-            setText(P_CHORD0 + k, buf);
-
-            bool on = (playing >> p) & 1u;
-            float v = p < info_.count ? chopPeak_[p] : 0.f;
-            if (p < info_.count)
-            {
-                // the level as text too: 10 characters, # = level, playing chops get "> "
-                char bar[12];
-                int n = clamp((int)std::lround(v * 10.f), 0, 10);
-                for (int j = 0; j < 10; ++j) bar[j] = j < n ? '#' : '-';
-                bar[10] = 0;
-                std::snprintf(buf, sizeof buf, "%s%d %s", on ? "> " : "", p + 1, bar);
-            }
-            else
-                std::snprintf(buf, sizeof buf, "%d leer", p + 1);
-            setText(P_WAVE0 + k, buf);
-            if (std::fabs(getNormalised(P_WAVE0 + k) - v) > 1e-4f)
-            {
-                setNormalised(P_WAVE0 + k, v);
-                if (notify) notifyHostParameterChanged(P_WAVE0 + k);
-            }
-        }
-        bankShown_ = bank;
-
-        bool dirty;
-        {
-            std::lock_guard<std::mutex> g(mtx_);
-            dirty = textsDirty_;
-            textsDirty_ = false;
-        }
-        if (dirty && notify) requestDisplayUpdate();
     }
 
-    // The MPC re-reads a text only when it thinks the value changed: nudge the browser's text parameters,
-    // tell the host (audioMasterAutomate) and ask for a redraw (audioMasterUpdateDisplay).
-    void refreshBrowser()
+    // ------------------------------------------------------------------ worker: buttons
+    void startLearning()
     {
-        bool dirty;
+        for (auto& n : learnNotes_) n.store(-1);
+        learnStep_.store(0);
+        learning_.store(true, std::memory_order_release);
+    }
+
+    void finishLearning()
+    {
+        learning_.store(false);
+        for (auto& n : noteToPad_) n.store(-1);
+        for (int k = 0; k < kPads; ++k)
         {
-            std::lock_guard<std::mutex> g(mtx_);
-            dirty = browserDirty_;
-            browserDirty_ = false;
+            int n = learnNotes_[k].load();
+            if (n >= 0 && n < 128) noteToPad_[n].store(k);
         }
-        if (!dirty) return;
-        refreshTick_ = !refreshTick_;
-        const float v = refreshTick_ ? 1.f : 0.f;
-        int list[kRows + 3];
-        int n = 0;
-        for (int i = 0; i < kRows; ++i) list[n++] = P_ROWT0 + i;
-        list[n++] = P_PATH; list[n++] = P_PAGEINFO; list[n++] = P_LOADED;
-        for (int i = 0; i < n; ++i)
+        mapLearned_.store(true);
+        saveSettings();
+    }
+
+    // a change that has stayed for two looks (>= 40 ms) is a tap / a turn; the MPC's short probes are not
+    void handleButtons()
+    {
+        for (int i = 0; i < kButtons; ++i)
         {
-            setNormalised(list[i], v);
-            notifyHostParameterChanged(list[i]);
+            const int p = P_SAVE + i;
+            int v = getInt(p);
+            if (v != btnSeen_[i] && v == btnPrev_[i])
+            {
+                int delta = v - btnSeen_[i];
+                btnSeen_[i] = v;
+                if (p == P_SAVE) saveChop();
+                else if (p == P_LEARN) { startLearning(); setupTexts(); }
+                else if (p == P_SCROLL) { top_ += delta > 0 ? 1 + (delta - 1) / 6 : -1 - (-delta - 1) / 6; clampTop(); }
+                else if (p == P_BACK) goUp();
+                else if (p == P_DRVBTN) { cwd_.clear(); listDirNow(); }
+                else if (p == P_PGUP) { top_ -= kRows; clampTop(); }
+                else if (p == P_PGDN) { top_ += kRows; clampTop(); }
+                else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
+                // P_PADTAP0..: handled in process() (no delay)
+            }
+            btnPrev_[i] = v;
         }
-        requestDisplayUpdate();
     }
 
     void workerMain()
     {
         using clock = std::chrono::steady_clock;
-        setText(P_LINK, linkOk_ ? "bereit (" + link_.path() + ")" : "Fehler: " + link_.error());
         writeTest();
-        {
-            std::lock_guard<std::mutex> g(mtx_);
-            std::string last = loadSettingsDir();
-            cwd_ = (!last.empty() && isDir(last)) ? last : std::string();
-            listLocked();
-        }
-        clock::time_point cutChanged{}, lastDrives{};
+        lastDir_ = settingsValue("lastdir");
+        cwd_ = (!lastDir_.empty() && isDir(lastDir_)) ? lastDir_ : std::string();
+        listDirNow();
+        clock::time_point cutChanged{}, lastSlow{};
         int lastMode = getInt(P_MODE), lastChops = getInt(P_CHOPS);
         bool cutPending = false;
 
@@ -939,90 +942,36 @@ private:
         {
             auto now = clock::now();
 
-            // drives (shown in LAUFWERKE; the drive list of the browser follows when it is shown)
-            if (now - lastDrives > std::chrono::seconds(3))
-            {
-                lastDrives = now;
-                std::string names;
-                for (const std::string& d : findDrives(false)) names += (names.empty() ? "" : ", ") + pathLabel(d);
-                setText(P_DRIVES, names.empty() ? std::string("keins gefunden") : names);
-                std::lock_guard<std::mutex> g(mtx_);
-                if (cwd_.empty()) { std::string sel = entries_.empty() ? std::string() : entries_[(size_t)cursor_].path; listLocked(sel); }
-            }
-
-            // the endless controls: a new value counts once it has stayed for two looks (>= 40 ms);
-            // the MPC's quick "what would the text be" probes are set back long before that
-            std::string want, dirToSave;
+            // a project brought its sample along
+            std::string want;
             {
                 std::lock_guard<std::mutex> g(mtx_);
-                int b = getInt(P_BROWSE), o = getInt(P_OPEN), sv = getInt(P_SAVE);
-                if (b != seenBrowse_ && b == prevBrowse_) stepBrowserLocked(b);
-                if (o != seenOpen_ && o == prevOpen_) openLocked(o);
-                if (sv != seenSave_ && sv == prevSave_) { seenSave_ = sv; saveRequested_ = true; }
-                prevBrowse_ = b; prevOpen_ = o; prevSave_ = sv;
-                // the BROWSER page's buttons: a change that has stayed for two looks is a tap
-                for (int k = 0; k < kButtons; ++k)
-                {
-                    int v = getInt(P_ROWB0 + k);
-                    if (v != btnSeen_[k] && v == btnPrev_[k])
-                    {
-                        btnSeen_[k] = v;
-                        if (k < kRows) tapRowLocked(k);
-                        else if (k == kRows) { goUpLocked(); browserDirty_ = true; }
-                        else if (k == kRows + 1) { cwd_.clear(); listLocked(); browserDirty_ = true; }
-                        else if (k == kRows + 2) { page_ = std::max(0, page_ - 1); browserDirty_ = true; }
-                        else
-                        {
-                            int pages = std::max(1, ((int)entries_.size() + kRows - 1) / kRows);
-                            page_ = std::min(pages - 1, page_ + 1);
-                            browserDirty_ = true;
-                        }
-                    }
-                    btnPrev_[k] = v;
-                }
                 if (pathRequest_) { want = requestedPath_; pathRequest_ = false; }
-                if (lastDirDirty_) { dirToSave = lastDir_; lastDirDirty_ = false; }
             }
-            if (!dirToSave.empty()) saveSettings(dirToSave);
-            if (!want.empty())
-            {
-                if (loadPath(want)) cutAndPublish();
-                std::lock_guard<std::mutex> g(mtx_);
-                browserDirty_ = true;
-            }
-            refreshBrowser();
+            if (!want.empty() && loadPath(want)) cutAndPublish();
 
-            // MODE / CHOPS: cut again once the knob rests
+            handleButtons();
+            if (learning_.load() && learnStep_.load() >= kPads) { finishLearning(); setupTexts(); }
+            if (lastDirDirty_) { lastDirDirty_ = false; saveSettings(); }
+
+            // MODUS / CHOPS: cut again once the knob rests
             int m = getInt(P_MODE), c = getInt(P_CHOPS);
             if (m != lastMode || c != lastChops) { lastMode = m; lastChops = c; cutPending = true; cutChanged = now; }
             if (cutPending && now - cutChanged > std::chrono::milliseconds(300)) { cutPending = false; cutAndPublish(); }
 
-            // SAVE CHOP
-            bool save;
+            // the drive list follows USB sticks / SD cards
+            if (now - lastSlow > std::chrono::seconds(3))
             {
-                std::lock_guard<std::mutex> g(mtx_);
-                save = saveRequested_;
+                lastSlow = now;
+                setupTexts();
+                if (cwd_.empty()) listDirNow();
             }
-            if (save)
-            {
-                saveChop();
-                std::lock_guard<std::mutex> g(mtx_);
-                saveRequested_ = false;
-                textsDirty_ = true;
-            }
+            else if (learning_.load())
+                setupTexts();
 
-            {
-                char d[48];
-                int asked, opened;
-                {
-                    std::lock_guard<std::mutex> g(mtx_);
-                    asked = asked_; opened = opened_;
-                }
-                std::snprintf(d, sizeof d, "Abfragen %d, geoeffnet %d", asked, opened);
-                setText(P_DIAG, d);
-            }
-            setText(P_LOADED, sampleName_.empty() ? std::string("Testloop (eingebaut)") : sampleName_);
-            updateScreen();
+            browserTexts();
+            padTexts();
+            pushScreen();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
         }
     }
@@ -1033,13 +982,18 @@ private:
     Voice voices_[kVoices];
     double sr_ = 44100.0;
     float gainSmooth_ = -1.f;
+    int padTapSeen_[kPads] = {};
 
-    // hand-over between worker and audio thread (lock-free)
+    // shared with the audio thread (lock-free)
     std::atomic<hh::ChopSet*> pending_{nullptr};
     std::atomic<hh::ChopSet*> retired_[4];
-    std::atomic<int> lastPad_{-1}, lastNote_{-1}, hostBpmX100_{0};
+    std::atomic<int> lastPad_{-1}, lastNote_{-1}, lastChop_{-1}, lastPlayed_{-1}, hostBpmX100_{0};
     std::atomic<uint32_t> hitCount_{0};
     std::atomic<uint64_t> playingMask_{0};
+    std::atomic<int8_t> noteToPad_[128];
+    std::atomic<bool> mapLearned_{false}, learning_{false};
+    std::atomic<int> learnStep_{0};
+    std::atomic<int> learnNotes_[kPads];
 
     // worker
     std::thread worker_;
@@ -1050,28 +1004,24 @@ private:
     hh::SampleData src_;
     hh::SampleInfo info_;
     float sampleBpm_ = 0.f;
-    float chopPeak_[64] = {};
     size_t chopStart_[64] = {}, chopEnd_[64] = {};
     std::string sampleName_;
-    int cutMode_ = 0, cutCount_ = 16, bankShown_ = -1;
+    bool ready_ = false;
     uint32_t lastReaderBeat_ = 0;
     std::chrono::steady_clock::time_point readerSeen_{};
     bool readerEver_ = false;
+    std::vector<Entry> entries_;
+    std::string cwd_, lastDir_;   // "" = the drive list, "*" = every mount
+    int top_ = 0;                 // first row shown
+    bool lastDirDirty_ = false;
+    int btnSeen_[kButtons] = {}, btnPrev_[kButtons] = {};
+    std::vector<std::string> shown_; // what the MPC was last told about, per text parameter
 
     // shared between worker and UI thread (mtx_)
     std::mutex mtx_;
-    std::vector<int> textParams_;
     std::vector<std::string> texts_;
-    std::vector<Entry> entries_;
-    std::string cwd_, lastDir_;          // "" = the drive list, "*" = every mount
-    int cursor_ = 0, seenBrowse_ = 0, seenOpen_ = 0, seenSave_ = 0;
-    int prevBrowse_ = 0, prevOpen_ = 0, prevSave_ = 0, asked_ = 0, opened_ = 0;
-    static const int kButtons = kRows + 4; // rows, ZURUECK, LAUFWERKE, < SEITE, SEITE >
-    int btnSeen_[kButtons] = {}, btnPrev_[kButtons] = {};
-    int page_ = 0;
-    bool browserDirty_ = true, refreshTick_ = false;
     std::string loadedPath_, requestedPath_;
-    bool pathRequest_ = false, textsDirty_ = false, lastDirDirty_ = false, saveRequested_ = false;
+    bool pathRequest_ = false;
 };
 
 MPC_PLUGIN_ENTRY(ChopTest)

@@ -19,9 +19,9 @@ jobs:
       - name: Build CHOP TEST (native + arm32 + arm64, skins, validator)
         run: python sdk/tools/build.py "chop-test/CHOP TEST"
 
-      - name: CHOP TEST - add the BROWSER page (hand-made skin page) and validate again
+      - name: CHOP TEST - hand-made pages BROWSER, PADS, SETUP and validate again
         run: |
-          python chop-test/tools/add_browser.py "chop-test/CHOP TEST"
+          python chop-test/tools/build_skin.py "chop-test/CHOP TEST"
           python sdk/tools/validate.py "chop-test/CHOP TEST"
 
       - name: Build CHOP LINK
