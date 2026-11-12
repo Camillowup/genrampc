@@ -1,0 +1,17 @@
+{
+  "name": "CHOP LINK",
+  "manufacturer": "Genra",
+  "version": "0.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnCl",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/chop-link-arm32.so",
+  "file64": "VST/chop-link-arm64.so",
+  "description": "Mini test, part two: follows CHOP TEST on another track (key, chord of the last pad) and plays a test tone.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}

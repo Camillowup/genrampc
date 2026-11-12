@@ -1,0 +1,50 @@
+{
+  "pages": [
+    { "name": "TEST",
+      "controls": [
+        { "param": "ROOT",      "widget": "slider" },
+        { "param": "VOLUME",    "widget": "knob" },
+        { "param": "KEY",       "widget": "slider" },
+        { "param": "LAUFWERKE", "widget": "slider" },
+        { "param": "FOLDER",    "widget": "slider" },
+        { "param": "MODE",      "widget": "switch" },
+        { "param": "TEMPO",     "widget": "slider" },
+        { "param": "SCHREIBEN", "widget": "slider" },
+        { "param": "SAMPLE",    "widget": "slider" },
+        { "param": "CHOPS",     "widget": "knob" },
+        { "param": "PAD",       "widget": "slider" },
+        { "param": "LINK",      "widget": "slider" },
+        { "param": "LOAD",      "widget": "switch" },
+        { "param": "PITCH",     "widget": "knob", "polarity": "bipolar" },
+        { "param": "ANALYSE",   "widget": "slider" },
+        { "param": "SAVE CHOP", "widget": "switch" }
+      ] },
+    { "name": "CHORDS",
+      "controls": [
+        { "param": "AKKORD 13", "widget": "slider" }, { "param": "AKKORD 14", "widget": "slider" },
+        { "param": "AKKORD 15", "widget": "slider" }, { "param": "AKKORD 16", "widget": "slider" },
+        { "param": "AKKORD 9",  "widget": "slider" }, { "param": "AKKORD 10", "widget": "slider" },
+        { "param": "AKKORD 11", "widget": "slider" }, { "param": "AKKORD 12", "widget": "slider" },
+        { "param": "AKKORD 5",  "widget": "slider" }, { "param": "AKKORD 6",  "widget": "slider" },
+        { "param": "AKKORD 7",  "widget": "slider" }, { "param": "AKKORD 8",  "widget": "slider" },
+        { "param": "AKKORD 1",  "widget": "slider" }, { "param": "AKKORD 2",  "widget": "slider" },
+        { "param": "AKKORD 3",  "widget": "slider" }, { "param": "AKKORD 4",  "widget": "slider" }
+      ] },
+    { "name": "WAVE",
+      "controls": [
+        { "param": "CHOP 1",  "widget": "fader" }, { "param": "CHOP 2",  "widget": "fader" },
+        { "param": "CHOP 3",  "widget": "fader" }, { "param": "CHOP 4",  "widget": "fader" },
+        { "param": "CHOP 5",  "widget": "fader" }, { "param": "CHOP 6",  "widget": "fader" },
+        { "param": "CHOP 7",  "widget": "fader" }, { "param": "CHOP 8",  "widget": "fader" },
+        { "param": "CHOP 9",  "widget": "fader" }, { "param": "CHOP 10", "widget": "fader" },
+        { "param": "CHOP 11", "widget": "fader" }, { "param": "CHOP 12", "widget": "fader" },
+        { "param": "CHOP 13", "widget": "fader" }, { "param": "CHOP 14", "widget": "fader" },
+        { "param": "CHOP 15", "widget": "fader" }, { "param": "CHOP 16", "widget": "fader" }
+      ] },
+    { "name": "SETUP",
+      "controls": [
+        { "param": "UPDATE",   "widget": "switch" },
+        { "param": "PAD NOTE", "widget": "slider", "overlay": "menu" }
+      ] }
+  ]
+}

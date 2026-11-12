@@ -1,0 +1,17 @@
+{
+  "name": "CHOP TEST",
+  "manufacturer": "Genra",
+  "version": "0.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnCt",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Sampler",
+  "file32": "VST/chop-test-arm32.so",
+  "file64": "VST/chop-test-arm64.so",
+  "description": "Mini test for GENRA CHOP on the MPC: browse the drives, load a WAV, chop it with the GENRA CHOP engine, play the chops on the pads, test file writing and the link to CHOP LINK.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}
