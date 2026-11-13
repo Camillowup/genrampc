@@ -11,7 +11,7 @@ On the MPC, GENRA is a set of five plugins, one per track:
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
 | **GENRA CHOP** 0.3 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, SAVE WAV | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA BASS** 0.3 | bass | Plays and shapes the bass line: RHYTHM, NOTES, DENSITY, KEY LOCK, 36 presets (808, SUB, UPRIGHT, E-BASS, REESE, ACID) | white, grey display (MPC2500 LE) |
+| **GENRA BASS** 0.4 | bass | Plays and shapes the bass line: RHYTHM, NOTES, DENSITY, KEY LOCK, 36 presets (808, SUB, UPRIGHT, E-BASS, REESE, ACID) | white, grey display (MPC2500 LE) |
 | **SCHLAG** 0.2 | drums | 8-voice drum random sampler: every voice rolls its samples from a folder (RANDOM ring), 4 function slots per voice | black, grey display (MPC3000 LE) |
 | **GENRA MELODY** 0.1 | melody | Plays and shapes the melody (monophonic): RHYTHM, NOTES, RANGE, slides and accents, 36 presets (KEYS, RHODES, PLUCK, LEAD, BELL, FLUTE) | blue, grey display (MPC1000 / MPC One G2) |
 | **GENRA PADS** 0.1 | pads | Plays the chords of the loop (HOLD, STABS, CHOP, VOICING) or chords on the 16 MPC pads (SONG, DEGREE, TENSION), 6 voices, 36 presets (STRINGS, CHOIR, SYNTH, ORGAN, E-PIANO, VINYL) | red, grey display (MPC2000XL SE) |
@@ -56,7 +56,10 @@ next bar. Every panel, page and message is in English.
 - **BASS**: the 4-bar line with the chords, NEW, UNDO, AUTO | PADS, KEY LOCK (your notes follow GENRA CHOP's key),
   RHYTHM Kick / Chop / Own, NOTES Root / Chord / Free, DENSITY, SWING (0 = from the chop), GLIDE, OCTAVE and four
   sound knobs.
-- **PRINT**, **SETUP** (LINK, key, print folder, version).
+- **MIDI OUT (test in 0.4)**: the loop's notes also go to an ALSA sequencer port **GENRA BASS OUT**. On the MPC,
+  set a MIDI track's input to that port, arm Rec and press Play: the bass line should land in the sequence.
+  SETUP shows the port (client:port) and how many notes were sent, or why there is no port.
+- **PRINT**, **SETUP** (LINK, key, print folder, MIDI OUT).
 
 ## SCHLAG (drums, another track)
 

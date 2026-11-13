@@ -22,6 +22,8 @@
 // Karplus-Strong) / Reese (two detuned saws), SUB (sine an octave down), DETUNE (a second oscillator), NOISE
 // (the attack's click / thump) -> low-pass (SVF: CUTOFF, RESO, ENV) -> DRIVE -> ADSR -> LEVEL, lifted when the
 // filter is closed (up to +9 dB) -> soft limiter.
+// MIDI OUT (test, 0.4): the loop's notes also go to an ALSA sequencer port "GENRA BASS OUT" (common/genra_midiout.h),
+// so the MPC can record them on a MIDI track whose input is that port. SETUP shows the port and the notes sent.
 // Threads: process() (audio); a worker copies the loop out of the shared memory, builds the line and the screen.
 
 #include "mpc_plugin.h"
@@ -29,6 +31,7 @@
 #include "dsp/svf.h"
 #include "../../common/genra_files.h"
 #include "../../common/genra_link.h"
+#include "../../common/genra_midiout.h"
 #include "../../common/genra_ui.h"
 
 #include <chrono>
@@ -104,7 +107,7 @@ static const char* const kCaptions[][2] = {
     {"cat6", "ACID"}, {"hint", "Tap a preset to load · double tap = big knob"},
     {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
     {"padsinfo", "PADS: only the MPC track's notes"}, {"r1", "LINK"}, {"r2", "Key"}, {"r3", "Print folder"},
-    {"r4", "Version"}};
+    {"r4", "MIDI OUT"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -184,7 +187,7 @@ public:
         screen_.button(P_PRINT, P_FLASH0 + 2);
         screen_.watch(P_CAT);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA BASS 0.3 · LINK v3");
+        screen_.setText(P_VERSION, "opening ...");
     }
 
     ~GenraBass() override
@@ -199,7 +202,7 @@ public:
         i.name = "GENRA BASS";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'B', 's');
-        i.version = 300;
+        i.version = 400;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -276,6 +279,7 @@ public:
         else
         {
             if (wasPlaying_ && gate_ > 0.0) gate_ = 0.0;
+            if (wasPlaying_) { midi_.allOff(); midiNote_ = -1; midiGate_ = 0.0; }
             wasPlaying_ = false;
             nPending_ = 0;
             curStep_.store(playing ? curStepOf(tr) : -1, std::memory_order_relaxed);
@@ -323,12 +327,19 @@ public:
                 {
                     const Pending& p = pending_[k];
                     noteOn(p.note, p.vel, p.slide, p.gate);
+                    // the same note to the MIDI port: a slide overlaps the old note (legato), else it ends first
+                    const int v = std::max(1, (int)std::lround(p.vel * 127.f));
+                    if (p.slide && midiNote_ >= 0 && midiNote_ != p.note) { midi_.noteOn(p.note, v); midi_.noteOff(midiNote_); }
+                    else { if (midiNote_ >= 0) midi_.noteOff(midiNote_); midi_.noteOn(p.note, v); }
+                    midiNote_ = p.note;
+                    midiGate_ = p.gate;
                     pending_[k] = pending_[--nPending_];
                 }
                 else ++k;
             }
             gainSmooth_ += (target - gainSmooth_) * 0.002f;
             if (gate_ > 0.0) { gate_ -= 1.0; if (gate_ < 0.0) gate_ = 0.0; }
+            if (midiNote_ >= 0 && midiGate_ > 0.0) { midiGate_ -= 1.0; if (midiGate_ <= 0.0) { midi_.noteOff(midiNote_); midiNote_ = -1; } }
             const bool held = gate_ < 0.0 || gate_ > 0.0;
             if (!held && stage_ != 0) stage_ = 0;
             if (stage_ == 1) { env_ += attC; if (env_ >= 1.f) { env_ = 1.f; stage_ = 2; } }
@@ -713,6 +724,7 @@ private:
         genralink::Loop tmp;
         genralink::Link::clearLoop(loop_);
         genralink::Link::Alive alive;
+        midi_.open("GENRA BASS");
         if (presetRow_.load() < 0) applyPreset(clamp(getInt(P_CAT), 0, kCats - 1), 0); else rememberSound();
         long long lastSlow = 0;
         while (!quit_.load())
@@ -761,6 +773,12 @@ private:
                 }
             }
             texts(L, on);
+            {
+                char mb[48];
+                if (midi_.ok()) std::snprintf(mb, sizeof mb, "%s · %ld", midi_.status().c_str(), midi_.sent());
+                else std::snprintf(mb, sizeof mb, "off: %s", midi_.status().c_str());
+                screen_.setText(P_VERSION, mb);
+            }
             lineColumns();
             screen_.push();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -792,6 +810,9 @@ private:
     float env_ = 0.f, fenv_ = 0.f, vel_ = 1.f, gainSmooth_ = -1.f, drop_ = 0.f;
     float hz_ = 55.f, targetHz_ = 55.f;
     double gate_ = -1.0, nextStep_ = 0.0;
+    genramidi::Out midi_;
+    int midiNote_ = -1;
+    double midiGate_ = 0.0;
     bool wasPlaying_ = false;
     Pending pending_[8];
     int nPending_ = 0;
