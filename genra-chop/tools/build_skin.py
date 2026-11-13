@@ -293,6 +293,9 @@ class Images:
 
 
 # ------------------------------------------------------------------ pages
+KNOB_DEFS = {}  # custom components of the film-strip knobs (name -> definition), added to the TUI by main()
+
+
 class Page:
     flashes = {}  # key parameter -> its flash strip parameter
 
@@ -375,8 +378,16 @@ class Page:
                               "Yes", "Hide", "Always", remap=[("Data", self.h[param])]))
 
     def knob_only(self, param, b, png):
-        self.c.append(G.entry("knob %d" % len(self.c), "Knob", G.knob_filmstrip_data(png, 127), b, "Yes", "Hide",
-                              "Always", remap=[("Data", self.h[param])]))
+        """A film-strip knob in its own component, so a double tap (or Enter) opens the MPC's large knob editor."""
+        w, h = [int(v) for v in b.split()[2:]]
+        name = "genra knob %s %dx%d" % (png[:-4], w, h)
+        if name not in KNOB_DEFS:
+            KNOB_DEFS[name] = G.component_definition(
+                G.control_actions("knob overlay"),
+                [G.entry("knob", "Knob", G.knob_filmstrip_data(png, 127), "0 0 %d %d" % (w, h), "No", "Show", "Always")],
+                "00000000")
+        self.c.append(G.entry("knob %d" % len(self.c), name, G.obj(("version", 1), ("handleName", "Data")), b, "Yes",
+                              "Hide", "Always", remap=[("Data", self.h[param])]))
 
     def knob(self, param, x, y, size=64, name_colour=L_DARK, value_colour=L_MUTED, below=False):
         self.knob_only(param, "%d %d %d %d" % (x, y, size, size), self.img.knob(size))
@@ -497,20 +508,52 @@ def chop_page(p):
 def chop_browser(p):
     p.dark("20 6 1240 52")
     p.value("PFAD", "38 6 1210 52", 28.0, L_CREAM)
-    for k in range(10):
+    for k in range(9):
         y = 66 + k * 52
         p.dark("20 %d 880 48" % y)
         p.value("ZEILE %d" % (k + 1), "38 %d 850 48" % y, 26.0, L_CREAM)
         p.button("TIPP %d" % (k + 1), "20 %d 880 48" % y)
+    p.key("PAGE BACK", GREY, "pgup", "20 536 435 42", 24.0, L_KEYINK)
+    p.key("PAGE NEXT", GREY, "pgdn", "465 536 435 42", 24.0, L_KEYINK)
     p.key("BACK", RED, "back", "920 66 340 90", 32.0)
     p.key("DRIVES", KEY_OFF, "drives", "920 164 340 90", 32.0)
-    p.key("PAGE BACK", GREY, "pgup", "920 262 165 90", 28.0, L_KEYINK)
-    p.key("PAGE NEXT", GREY, "pgdn", "1095 262 165 90", 28.0, L_KEYINK)
-    p.key("SAVE HERE", KEY_OFF, "savehere", "920 360 340 70", 24.0)
+    p.key("SAVE HERE", KEY_OFF, "savehere", "920 262 340 70", 24.0)
     p.value("LISTINFO", "920 434 340 36", 22.0, L_MUTED, CENTRED)
     p.control("LIST", "951 472 278 107")
     p.caption("loaded", "20 584 150 40", 24.0, L_MUTED)
     p.value("GELADEN", "170 584 1090 40", 26.0, L_RED)
+
+
+STYLE_CHOICES = []  # "80s · Electro", ... (main() fills it from the plugin's STYLE parameter)
+
+
+def chop_style(p):
+    """STYLE: all styles as keys, one column per decade; a tap rolls a new loop in that style (end of the pattern)."""
+    chop_header(p)
+    p.caption("styletitle", "250 8 140 48", 26.0, L_MUTED)
+    p.lcd("390 9 550 46")
+    p.value("STYLEKOPF", "404 9 530 46", 21.0, L_LCD)
+    p.key("NEW ALL", RED, "newall", "950 9 310 46", 26.0)
+    eras = []
+    for i, c in enumerate(STYLE_CHOICES):
+        era = c.split(" · ")[0]
+        if not eras or eras[-1][0] != era:
+            eras.append((era, []))
+        eras[-1][1].append(i)
+    n, cw = len(STYLE_CHOICES), 244
+    for col, (era, idxs) in enumerate(eras):
+        x = 20 + col * (cw + 5)
+        p.dark("%d 66 %d 480" % (x, cw))
+        p.caption("era%d" % col, "%d 70 %d 34" % (x + 12, cw - 20), 20.0, L_CREAM)
+        for j, i in enumerate(idxs):
+            b = "%d %d %d 56" % (x + 8, 108 + j * 62, cw - 16)
+            p.film(p.img.state(i, n, cw - 16, 56), n, "STYLE", b)
+            p.value("STYLENAME %d" % (i + 1), b, 20.0, L_WHITE, CENTRED)
+            p.button("STYLE", b, button_id=i, group=n)
+    p.key("STYLE BACK", GREY, "stprev", "20 556 300 62", 24.0, L_KEYINK)
+    p.key("STYLE NEXT", GREY, "stnext", "330 556 300 62", 24.0, L_KEYINK)
+    p.caption("length", "650 556 110 62", 18.0, L_MUTED)
+    p.radio("LENGTH", ("len1", "len2", "len4", "len8"), (760, 885, 1010, 1135), 556, 120, 62, 18.0)
 
 
 def chop_print(p):
@@ -524,7 +567,7 @@ def chop_setup(p):
     for i in range(4):
         p.caption("help%d" % (i + 1), "20 %d 400 34" % (238 + i * 34), 22.0, L_MUTED)
     rows = (("r1", "BELEGUNG"), ("r2", "LAUFWERKSLISTE"), ("r3", "SCHREIBEN"), ("r4", "LINKINFO"),
-            ("r5", "ANALYSE"), ("r6", "SPEICHERORT"))
+            ("r5", "ANALYSE"), ("r6", "SPEICHERORT"), ("r7", "HOSTINFO"))
     for i, (key, param) in enumerate(rows):
         y = 20 + i * 70
         p.dark("450 %d 810 60" % y)
@@ -596,25 +639,23 @@ def schlag_folder(p):
     p.caption("ordner", "196 8 300 48", 28.0, L_MUTED)
     p.radio("VOICE", ["v%d" % (i + 1) for i in range(8)], [20 + i * 155 for i in range(8)], 62, 145, 40, 16.0)
     p.dark("20 110 600 46")
-    p.value("PFAD", "34 110 580 46", 20.0, L_CREAM)
-    for r in range(10):
-        y = 162 + r * 42
-        p.dark("20 %d 600 38" % y)
-        p.value("ZEILE %d" % (r + 1), "34 %d 580 38" % y, 19.0, L_CREAM)
-        p.button("TIPP %d" % (r + 1), "20 %d 600 38" % y)
-    p.key("PAGE BACK", GREY, "pgup", "20 584 190 36", 18.0, L_KEYINK)
-    p.key("PAGE NEXT", GREY, "pgdn", "216 584 190 36", 18.0, L_KEYINK)
-    p.key("FOLDER UP", KEY_OFF, "back", "412 584 208 36", 18.0)
-    p.dark("640 110 620 250")
-    p.value("STIMMINFO", "660 118 580 40", 24.0, L_CREAM)
-    p.value("STIMMORDNER", "660 166 580 36", 19.0, L_CREAM_MUTED)
-    p.value("STIMMSAMPLE", "660 206 580 36", 19.0, L_CREAM_MUTED)
-    p.value("STIMMANZAHL", "660 246 580 36", 19.0, L_CREAM_MUTED)
-    p.caption("hint1", "660 290 580 30", 17.0, L_CREAM_MUTED)
-    p.caption("hint2", "660 318 580 30", 17.0, L_CREAM_MUTED)
-    p.key("DRIVES", KEY_OFF, "drives", "640 372 300 60", 22.0)
-    p.key("ROOT HERE", RED, "root", "950 372 310 60", 18.0)
-    p.value("LISTINFO", "640 440 620 30", 18.0, L_MUTED, CENTRED)
+    p.value("PFAD", "34 110 580 46", 22.0, L_CREAM)
+    for r in range(8):
+        y = 162 + r * 52
+        p.dark("20 %d 600 48" % y)
+        p.value("ZEILE %d" % (r + 1), "34 %d 580 48" % y, 24.0, L_CREAM)
+        p.button("TIPP %d" % (r + 1), "20 %d 600 48" % y)
+    p.key("PAGE BACK", GREY, "pgup", "20 584 295 36", 18.0, L_KEYINK)
+    p.key("PAGE NEXT", GREY, "pgdn", "325 584 295 36", 18.0, L_KEYINK)
+    p.dark("640 110 620 110")
+    p.value("STIMMINFO", "660 114 300 40", 24.0, L_CREAM)
+    p.value("STIMMANZAHL", "960 114 284 40", 17.0, L_CREAM_MUTED)
+    p.value("STIMMORDNER", "660 150 580 32", 18.0, L_CREAM_MUTED)
+    p.value("STIMMSAMPLE", "660 182 580 32", 18.0, L_CREAM_MUTED)
+    p.key("FOLDER UP", RED, "back", "640 230 200 70", 24.0)
+    p.key("DRIVES", KEY_OFF, "drives", "850 230 200 70", 22.0)
+    p.key("ROOT HERE", KEY_OFF, "root", "1060 230 200 70", 20.0)
+    p.value("LISTINFO", "640 410 620 50", 18.0, L_MUTED, CENTRED)
     p.key("SAVE SAMPLE", KEY_OFF, "savesmp", "640 476 160 104", 17.0)
     p.control("LIST", "811 474 278 107")
     p.key("SAVE KIT", KEY_OFF, "savekit", "1100 476 160 104", 17.0)
@@ -687,13 +728,16 @@ def main():
 
     if plugin == "GENRA CHOP":
         cls = ChopPage
+        STYLE_CHOICES[:] = [list(q.choices) for q in params if q.name == "STYLE"][0]
         pages = (("BROWSER", chop_browser, ["941 464 298 123"]), ("CHOP", chop_page, ["596 502 664 76"]),
-                 ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
+                 ("STYLE", chop_style, []), ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
         choices = {"BANK": ["A", "B", "C", "D"], "VIEW": ["Sample", "Loop", "Chop"],
-                   "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"]}
-        screen = tabmap(4, {0: {13: idx["LIST"]},
+                   "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"],
+                   "LENGTH": ["1 bar", "2 bars", "4 bars", "8 bars"]}
+        screen = tabmap(5, {0: {13: idx["LIST"]},
                             1: {1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
-                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]}})
+                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]},
+                            2: {1: idx["STYLE"], 2: idx["LENGTH"], 3: idx["VOLUME"]}})
         program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
     elif plugin == "SCHLAG":
         cls = SchlagPage
@@ -713,6 +757,10 @@ def main():
         fn(pg)
         tabs.append(pg.tab(name, i, ql))
     for k, v in page_data:
+        if k == "componentDefinitions":
+            local = dict(v)["localComponentDefinitions"]
+            for name, comp in KNOB_DEFS.items():
+                local.append(G.obj(("key", name), ("value", comp)))
         if k == "replacementStrings":
             for param, names in choices.items():
                 v.append(G.obj(("key", h[param]), ("value", names)))

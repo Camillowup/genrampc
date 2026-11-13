@@ -42,7 +42,7 @@ using namespace genrafiles;
 
 namespace {
 
-static const int kRows = 10;   // rows of the browser
+static const int kRows = 9;    // rows of the browser
 static const int kPads = 16;   // chop slots per bank
 static const int kCols = 124;  // columns of the display
 static const int kLanes = 4;
@@ -55,7 +55,7 @@ static const char* const kCaptions[][2] = {
     {"style", "STYLE"}, {"newall", "NEW ALL"}, {"new", "NEW"}, {"modus", "MODE"}, {"transient", "Transient"},
     {"equal", "Equal"}, {"chops", "CHOPS"}, {"minus", "-"}, {"plus", "+"}, {"bank", "BANK"},
     {"bankA", "A"}, {"bankB", "B"}, {"bankC", "C"}, {"bankD", "D"}, {"undo", "UNDO"}, {"savewav", "SAVE WAV"},
-    {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODY"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"},
+    {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODY"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"}, {"stprev", "< STYLE"}, {"stnext", "STYLE >"},
     {"auto", "AUTO"}, {"padsmode", "PADS"}, {"choke", "CHOKE"}, {"rev", "REV"}, {"lock", "LOCK"},
     {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
     {"padsinfo", "PADS: only the MPC track's notes"}, {"printhere", "SAVE HERE"}, {"printstd", "STANDARD"},
@@ -64,7 +64,9 @@ static const char* const kCaptions[][2] = {
     {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
     {"help3", "(pad 1 = bottom left)"}, {"help4", "Used by every GENRA plugin"},
     {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
-    {"r6", "SAVE WAV to"}};
+    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
+    {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
+    {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
@@ -76,7 +78,7 @@ static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
 enum
 {
     P_PITCH = 0, P_DECAY, P_FILTER, P_LEVEL,
-    P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO,
+    P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH,
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
     P_NEWALL, P_NEW0,
     P_UNDO = P_NEW0 + kLanes, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
@@ -87,8 +89,9 @@ enum
     // texts
     P_PATH = P_SLOTTAP0 + kPads,
     P_LISTINFO, P_LOADED, P_HDR, P_CHOPSTXT, P_BARTXT, P_STATUS, P_LEARNINFO, P_MAPINFO, P_DRIVES, P_WRITE,
-    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS,
-    P_SLOTTXT0,
+    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR,
+    P_STYLENAME0,
+    P_SLOTTXT0 = P_STYLENAME0 + hh::NUM_STYLES,
     P_SLOTLEN0 = P_SLOTTXT0 + kPads,
     P_LANETXT0 = P_SLOTLEN0 + kPads,
     P_ROWT0 = P_LANETXT0 + kLanes,
@@ -220,6 +223,7 @@ public:
         addParam(choiceParam("view", "VIEW", {"Sample", "Loop", "Chop"}, 0));
         addParam(boolParam("choke", "CHOKE", true));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
+        addParam(choiceParam("length", "LENGTH", {"1 bar", "2 bars", "4 bars", "8 bars"}, 2));
         const char* lanes[kLanes] = {"DRUMS", "BASS", "MELODY", "PADS"};
         addButton("NEW ALL");
         for (int k = 0; k < kLanes; ++k) addButton((std::string("NEW ") + lanes[k]).c_str());
@@ -232,8 +236,9 @@ public:
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
         for (const char* t : {"PFAD", "LISTINFO", "GELADEN", "KOPF", "CHOPZAHL", "TAKT", "STATUS", "LERNINFO",
                               "BELEGUNG", "LAUFWERKSLISTE", "SCHREIBEN", "LINKINFO", "ANALYSE", "SPEICHERORT",
-                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS"})
+                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF"})
             addText(t);
+        for (int i = 0; i < hh::NUM_STYLES; ++i) addText(("STYLENAME " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTTEXT " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTLAENGE " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kLanes; ++i) addText(("SPURTEXT " + std::to_string(i + 1)).c_str());
@@ -254,6 +259,7 @@ public:
         screen_.init();
         for (int i = P_PATH; i < P_COL0; ++i) screen_.text(i);
         for (int i = 0; i < kNumCaps; ++i) screen_.text(P_CAP0 + i, kCaptions[i][1]);
+        for (int i = 0; i < hh::NUM_STYLES; ++i) screen_.text(P_STYLENAME0 + i, hh::STYLES[i].shortName);
         for (int i = 0; i < kCols; ++i) screen_.strip(P_COL0 + i, kColFrames);
         for (int i = 0; i < kPads; ++i) { screen_.strip(P_SLOTLIT0 + i, 3); screen_.strip(P_STEPLIT0 + i, 2); }
         for (int i = 0; i < kLanes * kPads; ++i) screen_.strip(P_CELL0 + i, 4);
@@ -271,6 +277,8 @@ public:
         screen_.watch(P_AUTO);
 
         for (auto& r : retired_) r.store(nullptr);
+        hostCycle_[0].store(0.0);
+        hostCycle_[1].store(0.0);
         for (auto& r : seqRetired_) r.store(nullptr);
         for (auto& r : previewRetired_) r.store(nullptr);
         for (int c = 0; c < hh::PADS; ++c)
@@ -301,7 +309,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 400;
+        i.version = 500;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -360,12 +368,18 @@ public:
         const bool autoMode = getInt(P_AUTO) == 0;
         const bool playing = tr.valid && tr.playing && tr.ppqValid;
         if (!playing || !seq_) swapSeq();
+        hostCycling_.store(tr.cycling, std::memory_order_relaxed);
+        hostCycle_[0].store(tr.cycleStartPpq, std::memory_order_relaxed);
+        hostCycle_[1].store(tr.cycleEndPpq, std::memory_order_relaxed);
+        hostBar_.store(tr.barStartPpq, std::memory_order_relaxed);
+        hostSig_.store(tr.timeSigNumerator * 100 + tr.timeSigDenominator, std::memory_order_relaxed);
 
         genralink::LinkData* L = link_.data();
         const double bpm = tr.tempoValid && tr.bpm > 1.0 ? tr.bpm : 120.0;
         if (tr.tempoValid) hostBpmX100_.store((int)std::lround(tr.bpm * 100.0), std::memory_order_relaxed);
         if (L)
         {
+            L->loopSteps.store((int32_t)loopSteps(), std::memory_order_relaxed);
             L->writerBeat.fetch_add(1, std::memory_order_relaxed);
             if (tr.tempoValid) L->bpmX100.store((int32_t)std::lround(tr.bpm * 100.0), std::memory_order_relaxed);
         }
@@ -389,11 +403,15 @@ public:
             const double q0 = tr.ppqPos * 4.0;
             const double q1 = q0 + ctx.numFrames / spStep;
             if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0) nextStep_ = std::ceil(q0 - 1e-6);
+            const long len = loopSteps();
             while (nextStep_ < q1)
             {
                 long n = (long)std::llround(nextStep_);
-                int s = (int)(((n % kSteps) + kSteps) % kSteps);
-                if (s % hh::STEPS == 0) swapSeq();
+                // LENGTH: 1, 2 or 4 bars of the loop, then from the start; 8 bars = the 4 bars twice.
+                // A new loop (NEW, STYLE) starts at the end of the pattern.
+                long pos = ((n % len) + len) % len;
+                int s = (int)(pos % kSteps);
+                if (pos == 0) swapSeq();
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
                 double at = (nextStep_ - q0) * spStep;
@@ -491,6 +509,7 @@ public:
     void loadExtraState(const uint8_t* data, size_t size) override
     {
         std::lock_guard<std::mutex> g(mtx_);
+        stateLoaded_.store(true);
         std::string s(reinterpret_cast<const char*>(data), size);
         bool v2 = s.compare(0, 4, "GC2\n") == 0;
         if (!v2 && s.compare(0, 4, "GC1\n") != 0) return;
@@ -747,6 +766,12 @@ private:
             v.pos += v.rev ? -v.rate : v.rate;
             ++v.age;
         }
+    }
+
+    long loopSteps() const
+    {
+        static const long k[4] = {16, 32, 64, 128};
+        return k[clamp(getInt(P_LENGTH), 0, 3)];
     }
 
     void swapSeq()
@@ -1226,7 +1251,7 @@ private:
     {
         const char* names[kLanes] = {"Drums", "Bass", "Melody", "Pads"};
         regenerate(k);
-        screen_.message(P_STATUS, std::string("NEW ") + names[k] + ": from the next bar");
+        screen_.message(P_STATUS, std::string("NEW ") + names[k] + ": at the end of the pattern");
     }
 
     // ------------------------------------------------------------------ worker: files
@@ -1311,13 +1336,30 @@ private:
         screen_.setText(P_WRITE, g.empty() ? std::string("no Genra folder") : "Genra folder: " + pathLabel(g));
     }
 
+    // what the MPC tells the plugin about its loop (to learn whether GENRA can follow the sequence length)
+    void hostTexts()
+    {
+        char b[96];
+        int sig = hostSig_.load();
+        double c0 = hostCycle_[0].load(), c1 = hostCycle_[1].load();
+        if (hostCycling_.load() || c1 > c0)
+            std::snprintf(b, sizeof b, "loop %s %.1f-%.1f beats · %d/%d", hostCycling_.load() ? "on" : "off", c0, c1, sig / 100, sig % 100);
+        else
+            std::snprintf(b, sizeof b, "no loop info · bar at %.1f · %d/%d", hostBar_.load(), sig / 100, sig % 100);
+        screen_.setText(P_HOSTINFO, b);
+        int st = clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1);
+        const hh::Style& y = hh::STYLES[st];
+        std::snprintf(b, sizeof b, "%s · %s · %.0f BPM", y.shortName, hh::ERA_NAMES[y.era], y.bpm);
+        screen_.setText(P_STYLEHDR, b);
+    }
+
     // ------------------------------------------------------------------ worker: buttons
     void handleTaps()
     {
         for (auto& t : screen_.taps())
         {
             const int p = t.first;
-            if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: new loop from the next bar"); }
+            if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: new loop at the end of the pattern"); }
             else if (p >= P_NEW0 && p < P_NEW0 + kLanes) newLane(p - P_NEW0);
             else if (p == P_UNDO)
             {
@@ -1369,9 +1411,10 @@ private:
         printDirChosen_ = settings_.get("printdir");
         browser_.rows = kRows;
         browser_.open(lastDir_);
-        clock::time_point cutChanged{}, lastSlow{};
+        clock::time_point cutChanged{}, lastSlow{}, styleChanged{};
+        const clock::time_point started = clock::now();
         int lastMode = getInt(P_MODE), lastChops = getInt(P_CHOPS), lastStyle = getInt(P_STYLE);
-        bool cutPending = false;
+        bool cutPending = false, stylePending = false;
         while (!quit_.load())
         {
             auto now = clock::now();
@@ -1399,7 +1442,16 @@ private:
             if (m != lastMode || c != lastChops) { lastMode = m; lastChops = c; cutPending = true; cutChanged = now; }
             if (cutPending && now - cutChanged > std::chrono::milliseconds(400)) { cutPending = false; cutAndPublish(false); }
             int st = getInt(P_STYLE);
-            if (st != lastStyle) { lastStyle = st; screen_.message(P_STATUS, "STYLE " + styleLabel(st) + ": press NEW ALL", 3000); }
+            // a project being loaded sets the style too: that is no reason for a new loop
+            if (stateLoaded_.exchange(false) || now - started < std::chrono::seconds(2)) { lastStyle = st; stylePending = false; }
+            if (st != lastStyle) { lastStyle = st; stylePending = true; styleChanged = now; }
+            // a new style rolls a new loop in it (after the knob / the keys rest for a moment)
+            if (stylePending && now - styleChanged > std::chrono::milliseconds(350))
+            {
+                stylePending = false;
+                regenerate(-1);
+                screen_.message(P_STATUS, std::string(hh::STYLES[st].shortName) + ": new loop at the end of the pattern", 4000);
+            }
 
             if (now - lastSlow > std::chrono::seconds(2))
             {
@@ -1412,6 +1464,7 @@ private:
             browserTexts();
             chopTexts();
             laneTexts();
+            hostTexts();
             displayColumns();
             screen_.push();
             std::this_thread::sleep_for(std::chrono::milliseconds(40));
@@ -1423,6 +1476,9 @@ private:
     // audio thread
     hh::ChopSet* cur_ = nullptr;
     Seq* seq_ = nullptr;
+    std::atomic<bool> stateLoaded_{false}, hostCycling_{false};
+    std::atomic<double> hostCycle_[2], hostBar_{0.0};
+    std::atomic<int> hostSig_{404};
     hh::SampleData* preview_ = nullptr;
     double previewPos_ = 0.0;
     int previewFade_ = -1;

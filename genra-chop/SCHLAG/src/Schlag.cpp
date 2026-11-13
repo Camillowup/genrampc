@@ -41,7 +41,7 @@ using namespace genrafiles;
 
 namespace {
 
-static const int kVoices = 8, kSlots = 4, kSteps = genralink::kSteps, kRows = 10, kPrintRows = 7;
+static const int kVoices = 8, kSlots = 4, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
 static const int kMaxFiles = 24, kFlashes = 12;
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
@@ -55,7 +55,7 @@ static const char* const kCaptions[][2] = {
     {"schlag", "SCHLAG"}, {"auto", "AUTO"}, {"padsmode", "PADS"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
     {"m", "M"}, {"s", "S"}, {"v1", "KICK"}, {"v2", "SNARE"}, {"v3", "CLAP"}, {"v4", "RIM"}, {"v5", "CL HAT"},
     {"v6", "OP HAT"}, {"v7", "TOM"}, {"v8", "PERC"}, {"p1", "1"}, {"p2", "2"}, {"p3", "3"}, {"p4", "4"},
-    {"p5", "5"}, {"p6", "6"}, {"p7", "7"}, {"p8", "8"}, {"ordner", "· FOLDER"}, {"back", "FOLDER ▲"},
+    {"p5", "5"}, {"p6", "6"}, {"p7", "7"}, {"p8", "8"}, {"ordner", "· FOLDER"}, {"back", "BACK"},
     {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"}, {"root", "ROOT HERE"},
     {"hint1", "1st tap = listen"}, {"hint2", "2nd tap = the voice's sample"}, {"print", "PRINT"},
     {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
@@ -215,7 +215,7 @@ public:
         for (int i = P_FUNCTAP0; i < P_ROWTAP0 + kRows; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "SCHLAG 0.3 · LINK v3");
+        screen_.setText(P_VERSION, "SCHLAG 0.4 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -250,7 +250,7 @@ public:
         i.name = "SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 300;
+        i.version = 400;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -299,9 +299,14 @@ public:
         }
         genralink::LinkData* L = link_.data();
         if (L) L->lane[genralink::LANE_DRUMS].beat.fetch_add(1, std::memory_order_relaxed);
-        int r = ready_.load(std::memory_order_acquire);
-        if (r >= 0) inUse_.store(r, std::memory_order_release);
-        const genralink::Loop* loop = r >= 0 ? &loops_[r] : nullptr;
+        // the loop that plays: a new one from GENRA CHOP takes over at the end of the pattern (or at once when stopped)
+        const Transport& tr0 = ctx.transport;
+        const bool playing0 = tr0.valid && tr0.playing && tr0.ppqValid;
+        if (cur_ < 0 || !playing0) { int r = ready_.load(std::memory_order_acquire); if (r >= 0) cur_ = r; }
+        if (cur_ >= 0) inUse_.store(cur_, std::memory_order_release);
+        const genralink::Loop* loop = cur_ >= 0 ? &loops_[cur_] : nullptr;
+        long len = L ? (long)L->loopSteps.load(std::memory_order_relaxed) : 0;
+        if (len != 16 && len != 32 && len != 64 && len != 128) len = kSteps;
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -314,7 +319,7 @@ public:
         const bool autoMode = getInt(P_AUTO) == 0;
         const double bpm = tr.tempoValid && tr.bpm > 1.0 ? tr.bpm : 120.0;
         const double spStep = sr_ * 60.0 / bpm / 4.0;
-        if (playing && autoMode && loop)
+        if (playing && autoMode && cur_ >= 0)
         {
             const double q0 = tr.ppqPos * 4.0, q1 = q0 + ctx.numFrames / spStep;
             if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0) nextStep_ = std::ceil(q0 - 1e-6);
@@ -322,7 +327,13 @@ public:
             while (nextStep_ < q1)
             {
                 long n = (long)std::llround(nextStep_);
-                int s = (int)(((n % kSteps) + kSteps) % kSteps);
+                long pos = ((n % len) + len) % len;
+                int s = (int)(pos % kSteps);
+                if (pos == 0)
+                {
+                    int r = ready_.load(std::memory_order_acquire);
+                    if (r >= 0 && r != cur_) { cur_ = r; inUse_.store(cur_, std::memory_order_release); loop = &loops_[cur_]; }
+                }
                 uint32_t round = (uint32_t)(n / kSteps);
                 double base = (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0);
                 for (int v = 0; v < kVoices; ++v)
@@ -338,6 +349,7 @@ public:
                     for (int k = 0; k < rat && nHits_ < 64; ++k)
                         hits_[nHits_++] = {at + k * spStep / rat, v, h.vel / 127.f * (k ? 0.75f : 1.f), s, round};
                 }
+                if (s == 0) for (auto& sw : swapped_) sw.store(0, std::memory_order_relaxed); // a new pass: new marks
                 curStep_.store(s, std::memory_order_relaxed);
                 nextStep_ += 1.0;
             }
@@ -421,7 +433,7 @@ public:
         }
         for (int k = 0; k < nHits_; ++k) hits_[k].at -= ctx.numFrames;
         litMask_.store(lit, std::memory_order_relaxed);
-        inUse_.store(-1, std::memory_order_release);
+        // inUse_ keeps cur_: the worker must not overwrite the loop that plays
     }
 
     void saveExtraState(std::vector<uint8_t>& out) override
@@ -540,9 +552,9 @@ private:
         float pct = get(P_RANDOM0 + v) / 100.f;
         if (pct <= 0.f) return k.base;
         uint32_t seed = seed_[v].load(std::memory_order_relaxed);
-        uint32_t h = (uint32_t)step * 2654435761u ^ seed * 40503u ^ (uint32_t)v * 9176u;
-        h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12;
-        (void)round;
+        // a new roll on every pass of the loop (round), like the random sample of the Polyend Play
+        uint32_t h = (uint32_t)step * 2654435761u ^ seed * 40503u ^ (uint32_t)v * 9176u ^ round * 0x9e3779b9u;
+        h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
         if ((h & 0xffff) / 65535.f >= pct) return k.base;
         int alt = (int)((h >> 16) % (uint32_t)(n - 1));
         return alt >= k.base ? alt + 1 : alt;
@@ -1111,6 +1123,7 @@ private:
     std::atomic<uint32_t> litMask_{0};
     std::atomic<int> ready_{-1}, inUse_{-1}, curStep_{-1};
     genralink::Loop loops_[3];
+    int cur_ = -1; // audio thread: the loop that plays (index into loops_)
     // worker
     genralink::Loop loop_;
     KitInfo kitInfo_[kVoices];

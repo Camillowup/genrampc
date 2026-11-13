@@ -110,6 +110,9 @@ struct LinkData
     Loop                  loop;
     // written by the companions
     Companion             lane[NUM_LANES];
+    // written by GENRA CHOP (added at the end, so the layout above stays): the loop's length in steps
+    // (LENGTH: 16, 32, 64 or 128); a new loop starts when the position modulo this length is 0
+    std::atomic<int32_t>  loopSteps;
 };
 
 class Link
