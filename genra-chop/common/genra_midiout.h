@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // The MPC drops the MIDI a plugin hands to the host, so a plugin cannot record into the MPC's sequence. The
-// community workaround: open an ALSA sequencer client with a readable port ("GENRA BASS OUT"); the MPC lists it as
+// community workaround: open an ALSA sequencer client with a readable port ("GENRA CHOP OUT"); the MPC lists it as
 // a MIDI input, and a track whose input is that port records the notes while Rec is armed.
 // libasound is loaded at run time (dlopen), so the plugin needs no ALSA headers and still loads where there is no
 // ALSA: then the port simply is not there and status() says why.

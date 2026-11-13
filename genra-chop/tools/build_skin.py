@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""build_skin.py - writes the Plugin Skins of GENRA CHOP, GENRA BASS, SCHLAG, GENRA MELODY and GENRA PADS and draws
+"""build_skin.py - writes the Plugin Skins of GENRA CHOP and SCHLAG and draws
 every image.
 
 Look: the retro MPC (keys, dark fields, LCDs like the MPC 2000); every plugin has the colours of a limited-edition MPC
@@ -9,7 +9,7 @@ skin are not drawn on the MPC: every caption is a read-only parameter the plugin
 (display columns, slots, steps, cells, lamps, flashes) get their frame from the plugin as the parameter's value.
 
 Usage (after sdk/tools/build.py has built the plugin):
-    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"     (or "GENRA BASS", "SCHLAG")
+    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"     (or "SCHLAG")
 """
 
 import json
@@ -62,28 +62,12 @@ GREY_LCD = dict(LCD=(0xB4, 0xB7, 0xB0), LCD_SEL=(0xA4, 0xA7, 0xA0), LCD_DIM=(0x9
 THEMES = {
     # GENRA CHOP: retro cream (MPC60 / MPC Live II Retro), green MPC 2000 LCD - the defaults above
     "GENRA CHOP": {},
-    # GENRA BASS: white (MPC2500 LE)
-    "GENRA BASS": dict(GREY_LCD, DARK=(0x1E, 0x1E, 0x1E), CREAM=(0xEE, 0xEE, 0xEA), GREY=(0xCF, 0xCF, 0xCA),
-                       KEY_OFF=(0x8A, 0x8A, 0x86), PAD=(0x8A, 0x8A, 0x86), KNOB=(0x34, 0x34, 0x34),
-                       L_DARK="ff1e1e1e", L_MUTED="ff555552", L_CREAM="ffeeeeea", L_CREAM_MUTED="ffa8a8a4",
-                       L_KEYINK="ff1e1e1e"),
     # SCHLAG: black (MPC3000 LE)
     "SCHLAG": dict(GREY_LCD, DARK=(0x33, 0x33, 0x33), CREAM=(0xE8, 0xE8, 0xE4), GREY=(0x8C, 0x8C, 0x88),
                    KEY_OFF=(0x55, 0x55, 0x52), PAD=(0x6A, 0x6A, 0x66), LANE=(0x44, 0x44, 0x44),
                    KNOB=(0x48, 0x48, 0x48), RED=(0xD3, 0x2F, 0x2F), RED_LIT=(0xE8, 0x4A, 0x40),
                    L_DARK="ffe8e8e4", L_MUTED="ffa8a8a4", L_CREAM="ffe8e8e4", L_CREAM_MUTED="ff9a9a96",
                    L_PAD="fff0f0ec", L_RED="ffd32f2f", L_KEYINK="ff1c1c1c"),
-    # GENRA MELODY: blue (MPC1000 / MPC One G2), grey display
-    "GENRA MELODY": dict(GREY_LCD, DARK=(0x1D, 0x2B, 0x44), CREAM=(0xEE, 0xF2, 0xF7), GREY=(0xBF, 0xC3, 0xC7),
-                         KEY_OFF=(0x7D, 0x97, 0xB8), PAD=(0x7D, 0x97, 0xB8), KNOB=(0x2C, 0x3B, 0x57),
-                         L_DARK="fff2f4f7", L_MUTED="ffdce6f2", L_CREAM="ffeef2f7", L_CREAM_MUTED="ffa9bcd6",
-                         L_KEYINK="ff1d2b44"),
-    # GENRA PADS: red (MPC2000XL SE), black keys, grey display
-    "GENRA PADS": dict(GREY_LCD, DARK=(0x1C, 0x1C, 0x1C), CREAM=(0xF0, 0xEC, 0xE6), GREY=(0x8C, 0x8C, 0x88),
-                       KEY_OFF=(0x8C, 0x8C, 0x88), PAD=(0x8C, 0x8C, 0x88), KNOB=(0x3A, 0x3A, 0x3A),
-                       RED=(0x1C, 0x1C, 0x1C), RED_LIT=(0xE0, 0x50, 0x3F), SEL=(0xE0, 0x50, 0x3F),
-                       L_DARK="fff5ece8", L_MUTED="fff0d8d2", L_CREAM="fff0ece6", L_CREAM_MUTED="ffb5b0aa",
-                       L_RED="ff1c1c1c", L_KEYINK="ff1c1c1c"),
 }
 
 
@@ -296,44 +280,6 @@ class Images:
             i.disc(c, c, c * 0.55, (0x32, 0x32, 0x30))
             return i
         return self._write("ring%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
-
-    def line_cols(self, w=19, h=176):
-        """GENRA BASS: one column per step: 0 empty, 1..16 a note at that height, +17 the step that plays."""
-        def frame(f):
-            now, lvl = f >= 17, f % 17
-            i = Img(w, h)
-            i.rect(0, 0, w, h, LCD_SEL if now else LCD)
-            if lvl:
-                y = h - 12 - int((lvl - 1) / 15.0 * (h - 36))
-                i.rect(1, y - 6, w - 2, 10, LCD_INK, 2)
-            if now:
-                i.rect(w // 2 - 1, 0, 3, h, RED_LIT)
-            return i
-        return self._write("line_strip.png", lambda: strip([frame(f) for f in range(34)]))
-
-    def chord_cols(self, w=19, h=172):
-        """GENRA PADS: one column per step: frame = voices * 4 + 2 (a chord starts here) + 1 (the step that plays)."""
-        def frame(f):
-            n, start, now = f // 4, (f >> 1) & 1, f & 1
-            i = Img(w, h)
-            i.rect(0, 0, w, h, LCD_SEL if now else LCD)
-            for v in range(n):
-                y = h - 22 - v * 38
-                x0 = 4 if start else 0
-                i.rect(x0, y, w - x0, 11, LCD_INK, 2 if start else 0)
-            if now:
-                i.rect(w // 2 - 1, 0, 3, h, RED_LIT)
-            return i
-        return self._write("chord_strip.png", lambda: strip([frame(f) for f in range(20)]))
-
-    def pad_cells(self, w, h):
-        """GENRA PADS, PADS mode: a pad of the chord map; frame 0 = nothing (the display), 1 = a pad, 2 = it plays."""
-        def frame(f):
-            i = Img(w, h)  # frame 0 stays transparent: the chords of AUTO show through
-            if f:
-                i.rect(0, 0, w, h, RED_LIT if f == 2 else (0x22, 0x24, 0x22), 5)
-            return i
-        return self._write("padcell_strip.png", lambda: strip([frame(f) for f in range(3)]))
 
     def drum_cells(self, dead):
         def frame(f):
@@ -586,146 +532,9 @@ def chop_setup(p):
         p.value(param, "690 %d 560 60" % y, 24.0, L_CREAM)
 
 
-# ------------------------------------------------------------------ GENRA BASS, GENRA MELODY, GENRA PADS
-class TonePage(Page):
-    flashes = {"NEW": "BLITZ 1", "UNDO": "BLITZ 2", "PRINT": "BLITZ 3"}
-
-
-NAME_W = {"GENRA BASS": 110, "GENRA MELODY": 150, "GENRA PADS": 110}
-TONE_SOUND = {
-    "GENRA BASS": (("WAVE", "SUB", "DETUNE", "NOISE"), ("CUTOFF", "RESO", "ENV", "DRIVE"),
-                   ("ATTACK", "DECAY", "SUSTAIN", "RELEASE")),
-    "GENRA MELODY": (("TONE", "BITE", "DETUNE", "AGE"), ("CUTOFF", "RESO", "ENV", "DRIVE"),
-                     ("ATTACK", "DECAY", "SUSTAIN", "RELEASE")),
-    "GENRA PADS": (("TONE", "ENSEMBLE", "DETUNE", "AGE"), ("CUTOFF", "RESO", "ENV", "DRIVE"),
-                   ("ATTACK", "DECAY", "SUSTAIN", "RELEASE")),
-}
-TONE_MAIN = {
-    "GENRA BASS": (("DENSITY", "SWING", "GLIDE", "OCTAVE"), ("CUTOFF", "DRIVE", "DECAY", "LEVEL")),
-    "GENRA MELODY": (("DENSITY", "SWING", "RANGE", "OCTAVE"), ("CUTOFF", "ATTACK", "DECAY", "LEVEL")),
-    "GENRA PADS": (("DENSITY", "SPREAD", "STRUM", "OCTAVE"), ("CUTOFF", "ATTACK", "RELEASE", "LEVEL")),
-}
-PLUGIN = ""  # the plugin being drawn (main() sets it)
-
-
-def tone_header(p, fields=True):
-    w = NAME_W.get(PLUGIN, 110)
-    p.caption("genra", "20 8 120 48", 34.0, L_DARK)
-    p.caption("name", "136 8 %d 48" % (w + 10), 34.0, L_RED)
-    if fields:
-        x = 140 + w
-        lw = 810 - x
-        p.dark("%d 9 %d 46" % (x, lw))
-        p.value("KOPFLINK", "%d 9 %d 46" % (x + 12, lw - 20), 20.0, L_CREAM)
-        p.dark("820 9 440 46")
-        p.value("KOPFPRESET", "832 9 420 46", 20.0, L_CREAM)
-
-
-def tone_sound(p):
-    tone_header(p)
-    p.radio("KIND", ["cat%d" % (i + 1) for i in range(6)], [20 + i * 69 for i in range(6)], 66, 65, 40, 13.0)
-    lit = p.img.two(DARK, SEL, 410, 52)
-    for r in range(6):
-        y = 116 + r * 58
-        p.film(lit, 2, "PRESETLICHT %d" % (r + 1), "20 %d 410 52" % y)
-        p.value("PRESETNAME %d" % (r + 1), "36 %d 390 52" % y, 21.0, L_CREAM)
-        p.button("PRESET %d" % (r + 1), "20 %d 410 52" % y)
-    for gi, (cap, params) in enumerate(zip(("osc", "filter", "env"), TONE_SOUND[PLUGIN])):
-        y = 66 + gi * 174
-        p.dark("450 %d 810 166" % y)
-        p.caption(cap, "466 %d 300 30" % (y + 6), 17.0, L_CREAM_MUTED)
-        for i, param in enumerate(params):
-            p.knob(param, 466 + i * 198, y + 54, 64, L_CREAM, L_CREAM_MUTED)
-    p.lcd("20 586 1240 32")
-    p.caption("hint", "32 586 1220 32", 16.0, L_LCD)
-
-
-def tone_buttons(p):
-    p.key("NEW", RED, "new", "20 276 180 60", 26.0)
-    p.key("UNDO", GREY, "undo", "208 276 140 60", 22.0, L_KEYINK)
-    p.radio("AUTO PADS", ("auto", "padsmode"), (356, 470), 276, 110, 60, 20.0)
-    p.toggle("KEY LOCK", "keylock", "588 276 170 60", 20.0)
-
-
-def tone_knobs(p):
-    pattern, tone = TONE_MAIN[PLUGIN]
-    p.dark("20 350 610 182")
-    p.caption("pattern", "36 354 300 28", 17.0, L_CREAM_MUTED)
-    p.dark("650 350 610 182")
-    p.caption("tone", "666 354 300 28", 17.0, L_CREAM_MUTED)
-    for i, param in enumerate(pattern):
-        p.knob(param, 76 + i * 150, 384, 64, L_CREAM, L_CREAM_MUTED, below=True)
-    for i, param in enumerate(tone):
-        p.knob(param, 706 + i * 150, 384, 64, L_CREAM, L_CREAM_MUTED, below=True)
-    p.lcd("20 544 1240 40")
-    p.value("STATUS", "32 544 1220 40", 18.0, L_LCD)
-
-
-def tone_main(p):
-    """GENRA BASS and GENRA MELODY: the line on the display, the chords above it."""
-    tone_header(p)
-    p.lcd("20 64 1240 200")
-    col = p.img.line_cols()
-    for s in range(64):
-        p.film(col, 34, "LINIE %d" % (s + 1), "%d 86 19 176" % (20 + int(round(s * 19.375))))
-    for b in range(4):
-        p.value("AKKORD %d" % (b + 1), "%d 64 300 22" % (30 + b * 310), 17.0, L_LCD)
-    tone_buttons(p)
-    p.caption("rhythm", "780 270 200 22", 15.0, L_MUTED)
-    p.radio("RHYTHM", ("rh1", "rh2", "rh3"), (780, 870, 960), 294, 86, 42, 17.0)
-    p.caption("notes", "1056 270 200 22", 15.0, L_MUTED)
-    p.radio("NOTES", ("no1", "no2", "no3"), (1056, 1126, 1196), 294, 66, 42, 15.0)
-    tone_knobs(p)
-
-
-def pads_main(p):
-    """GENRA PADS: AUTO shows the chords of the loop; PADS turns the display into the chords of the 16 MPC pads."""
-    img = p.img
-    tone_header(p)
-    p.lcd("20 64 1240 200")
-    col = img.chord_cols()
-    for s in range(64):
-        p.film(col, 20, "LINIE %d" % (s + 1), "%d 90 19 172" % (20 + int(round(s * 19.375))))
-    for b in range(4):
-        p.value("AKKORD %d" % (b + 1), "%d 64 300 24" % (30 + b * 310), 17.0, L_LCD)
-    cell = img.pad_cells(145, 76)
-    for i in range(16):
-        x = 30 + (i % 8) * 153
-        y = 92 + (1 - i // 8) * 84
-        p.film(cell, 3, "PADZELLE %d" % (i + 1), "%d %d 145 76" % (x, y))
-        p.value("PADNUMMER %d" % (i + 1), "%d %d 130 22" % (x + 8, y + 4), 13.0, "ffb4b7b0")
-        p.value("PADAKKORD %d" % (i + 1), "%d %d 145 44" % (x, y + 26), 21.0, "fff0f0ec", CENTRED)
-    p.key("NEW", RED, "new", "20 276 150 60", 26.0)
-    p.key("UNDO", GREY, "undo", "176 276 110 60", 22.0, L_KEYINK)
-    p.radio("AUTO PADS", ("auto", "padsmode"), (292, 384), 276, 88, 60, 19.0)
-    p.toggle("KEY LOCK", "keylock", "478 276 140 60", 18.0)
-    for k, (cap, param, caps) in enumerate((("rhythm", "RHYTHM", ("rh1", "rh2", "rh3")),
-                                            ("voicing", "VOICING", ("vo1", "vo2", "vo3")),
-                                            ("padset", "PAD SET", ("ps1", "ps2", "ps3")))):
-        x0 = 630 + k * 212
-        p.caption(cap, "%d 270 200 22" % x0, 15.0, L_MUTED)
-        p.radio(param, caps, (x0, x0 + 68, x0 + 136), 294, 64, 42, 13.0)
-    tone_knobs(p)
-
-
-def tone_print(p):
-    tone_header(p, False)
-    print_page(p, 140 + NAME_W.get(PLUGIN, 110), False)
-
-
-def tone_setup(p):
-    tone_header(p, False)
-    rows = (("r1", "LINKINFO"), ("r2", "TONARTINFO"), ("r3", "PRINTORDNER"), ("r4", "VERSION"))
-    for i, (key, param) in enumerate(rows):
-        y = 80 + i * 70
-        p.dark("20 %d 1240 60" % y)
-        p.caption(key, "40 %d 260 60" % y, 24.0, L_CREAM_MUTED)
-        p.value(param, "300 %d 940 60" % y, 24.0, L_CREAM)
-
-
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
-                "ROOT HERE"]
+                "ROOT HERE", "SAVE SAMPLE", "SAVE KIT"]
 DEAD_VOICES = {2: 3, 6: 4}  # CLAP and TOM: dying displays (value: the damage pattern)
 
 
@@ -806,7 +615,9 @@ def schlag_folder(p):
     p.key("DRIVES", KEY_OFF, "drives", "640 372 300 60", 22.0)
     p.key("ROOT HERE", RED, "root", "950 372 310 60", 18.0)
     p.value("LISTINFO", "640 440 620 30", 18.0, L_MUTED, CENTRED)
+    p.key("SAVE SAMPLE", KEY_OFF, "savesmp", "640 476 160 104", 17.0)
     p.control("LIST", "811 474 278 107")
+    p.key("SAVE KIT", KEY_OFF, "savekit", "1100 476 160 104", 17.0)
 
 
 def schlag_print(p):
@@ -822,6 +633,9 @@ def schlag_setup(p):
     for i in range(4):
         p.caption("help%d" % (i + 1), "20 %d 400 32" % (262 + i * 32), 20.0, L_MUTED)
     p.toggle("HAT CHOKE", "choke", "20 410 400 70", 24.0)
+    p.toggle("MPC KIT NOTES", "kitnotes", "450 440 400 70", 22.0)
+    for i in range(3):
+        p.caption("kithelp%d" % (i + 1), "870 %d 390 28" % (440 + i * 28), 17.0, L_MUTED)
     rows = (("r1", "BELEGUNG"), ("r2", "HAUPTORDNER"), ("r3", "LINKINFO"), ("r4", "SPEICHERINFO"), ("r5", "VERSION"))
     for i, (key, param) in enumerate(rows):
         y = 70 + i * 70
@@ -841,7 +655,6 @@ def tabmap(n, assigns):
 
 
 def main():
-    global PLUGIN
     if len(sys.argv) != 2:
         print(__doc__)
         return 2
@@ -882,33 +695,6 @@ def main():
                             1: {1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
                                 5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]}})
         program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
-    elif plugin in ("GENRA BASS", "GENRA MELODY", "GENRA PADS"):
-        PLUGIN = plugin
-        cls = TonePage
-        sound_q = ["450 66 810 166", "450 240 810 166", "450 414 810 166"]
-        main_q = ["20 350 610 182", "650 350 610 182"]
-        lane = {"GENRA BASS": "BASS", "GENRA MELODY": "MELODY", "GENRA PADS": "PADS"}[plugin]
-        main_fn = pads_main if plugin == "GENRA PADS" else tone_main
-        if plugin == "GENRA BASS":
-            pages = (("SOUND", tone_sound, sound_q), (lane, main_fn, main_q), ("PRINT", tone_print, []),
-                     ("SETUP", tone_setup, []))
-            sound_tab, main_tab = 0, 1
-        else:
-            pages = ((lane, main_fn, main_q), ("SOUND", tone_sound, sound_q), ("PRINT", tone_print, []),
-                     ("SETUP", tone_setup, []))
-            sound_tab, main_tab = 1, 0
-        kinds = {"GENRA BASS": ["808", "SUB", "UPRIGHT", "E-BASS", "REESE", "ACID"],
-                 "GENRA MELODY": ["KEYS", "RHODES", "PLUCK", "LEAD", "BELL", "FLUTE"],
-                 "GENRA PADS": ["STRINGS", "CHOIR", "SYNTH", "ORGAN", "E-PIANO", "VINYL"]}[plugin]
-        choices = {"KIND": kinds, "AUTO PADS": ["Auto", "Pads"]}
-        for q in params:
-            if q.name in ("RHYTHM", "NOTES", "VOICING", "PAD SET") and q.choices:
-                choices[q.name] = list(q.choices)
-        sound = [n for row in TONE_SOUND[plugin] for n in row]
-        pattern, tone = TONE_MAIN[plugin]
-        screen = tabmap(4, {sound_tab: {i + 1: idx[n] for i, n in enumerate(sound)},
-                            main_tab: {i + 1: idx[n] for i, n in enumerate(list(pattern) + list(tone))}})
-        program = qmap({i + 1: idx[n] for i, n in enumerate(sound)})
     elif plugin == "SCHLAG":
         cls = SchlagPage
         pages = (("SCHLAG", schlag_main, []), ("FOLDER", schlag_folder, ["801 466 298 123"]),

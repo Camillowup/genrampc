@@ -1,5 +1,5 @@
 // genra_link.h - LINK v3: the shared memory between GENRA CHOP (the chef) and its companions
-// (GENRA BASS, SCHLAG, GENRA MELODY, GENRA PADS), each on its own MPC track.
+// (SCHLAG), each on its own MPC track.
 //
 // SPDX-License-Identifier: GPL-3.0-only
 //

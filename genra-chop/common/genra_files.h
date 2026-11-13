@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // The Genra folder: <drive>/Genra, next to "VST2 Plugins" (so updating a plugin folder keeps everything):
-//   Genra/pads.txt        the learned pad notes, shared by GENRA CHOP, GENRA BASS and SCHLAG (learn once)
+//   Genra/pads.txt        the learned pad notes, shared by GENRA CHOP and SCHLAG (learn once)
 //   Genra/<PLUGIN>.txt    each plugin's own settings (last folder, save folder, ...)
 //   Genra/PRINT/          the prints (MIDI files), unless a plugin was told another folder
 // Fallback when the plugin does not sit in a "VST2 Plugins" folder: its own folder.
@@ -478,6 +478,7 @@ class Browser
 public:
     struct Entry { std::string label, path; int kind; }; // kind: 0 up, 1 folder, 2 file, 3 drive
     int rows = 10;
+    const char* extra = nullptr; // a second kind of file to list after the WAVs (e.g. ".kit")
 
     void open(const std::string& dir) { cwd_ = (!dir.empty() && isDir(dir)) ? dir : std::string(); list(); }
     void drives() { cwd_.clear(); list(); }
@@ -496,6 +497,8 @@ public:
             entries_.push_back({"..", "", 0});
             for (const std::string& n : listDir(cwd_, true)) entries_.push_back({n, cwd_ + "/" + n, 1});
             for (const std::string& n : listDir(cwd_, false)) entries_.push_back({n, cwd_ + "/" + n, 2});
+            if (extra)
+                for (const std::string& n : listDir(cwd_, false, extra)) entries_.push_back({n, cwd_ + "/" + n, 2});
         }
         top_ = 0;
         if (!select.empty())
@@ -538,6 +541,7 @@ public:
         const Entry& e = entries_[i];
         if (e.kind == 0) return "..  (back)";
         if (e.kind == 1 || e.kind == 3) return "[" + e.label + "]";
+        if (extra && hasExt(e.label, extra)) return "KIT  " + e.label.substr(0, e.label.size() - std::strlen(extra));
         if (!preview.empty() && e.path == preview) return "» " + stripWav(e.label);
         return ((!loaded.empty() && e.path == loaded) ? "> " : "") + stripWav(e.label);
     }
@@ -550,7 +554,7 @@ public:
     std::string info() const
     {
         int n = (int)entries_.size();
-        if (!n) return "leer";
+        if (!n) return "empty";
         char b[64];
         std::snprintf(b, sizeof b, "Rows %d-%d of %d", top_ + 1, std::min(n, top_ + rows), n);
         return b;

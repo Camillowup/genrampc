@@ -600,8 +600,10 @@ private:
     }
 
     // ------------------------------------------------------------------ MIDI OUT (GENRA CHOP OUT)
-    // channel 1 chops, 2 bass, 3 melody, 4 pads, 10 drums (the pad map's notes, voice order KICK .. PERC)
+    // channel 1 chops, 2 bass, 3 melody, 4 pads, 10 drums (MPC drum program notes A01-A08, voice order KICK .. PERC)
     static const int kChChops = 0, kChBass = 1, kChMel = 2, kChPads = 3, kChDrums = 9;
+    // channel 10: the notes of pads A01-A08 of a new MPC drum program (MPC default map), voice order KICK .. PERC
+    static constexpr int kKitNote[hh::DRUMS] = {37, 36, 42, 82, 40, 38, 46, 44};
     struct MidiEv { double at; uint8_t ch, note, vel; bool on; };
 
     void queueMidi(double on, double off, int ch, int note, float vel)
@@ -648,7 +650,7 @@ private:
             for (int k = 0; k < r; ++k)
             {
                 double tk = t + k * spStep / r;
-                queueMidi(tk, tk + 0.45 * spStep / r, kChDrums, pads_.noteOf(d), h.vel * (k ? 0.75f : 1.f));
+                queueMidi(tk, tk + 0.45 * spStep / r, kChDrums, kKitNote[d], h.vel * (k ? 0.75f : 1.f));
             }
         }
     }
@@ -983,7 +985,7 @@ private:
         };
         for (int i = 0; i < kSteps; ++i)
         {
-            l.bass[i] = note(pat_.bass[i]); // the base (DENSITY is GENRA BASS's own knob)
+            l.bass[i] = note(pat_.bass[i]); // the base (the base line)
             if (rend_.bass[i].pitch < 0 && pat_.bass[i].pitch >= 0) l.bass[i].prio = 255;
             l.mel[i] = note(rend_.mel[i]);
             for (int v = 0; v < 4; ++v) l.pad[i][v] = rend_.pad[i].pitch[v];

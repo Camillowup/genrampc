@@ -18,17 +18,17 @@ jobs:
           python-version: "3.12"
 
       # build.py fetches the zig cross compiler on first use (pip install ziglang into sdk/.sdk-tools)
-      - name: Build GENRA CHOP, GENRA BASS, SCHLAG, GENRA MELODY and GENRA PADS (native + arm32 + arm64)
+      - name: Build GENRA CHOP and SCHLAG (native + arm32 + arm64)
         run: |
           set -e
-          for p in "GENRA CHOP" "GENRA BASS" "SCHLAG" "GENRA MELODY" "GENRA PADS"; do
+          for p in "GENRA CHOP" "SCHLAG"; do
             python sdk/tools/build.py "genra-chop/$p"
           done
 
       - name: Pages (images drawn by the script) and validate again
         run: |
           set -e
-          for p in "GENRA CHOP" "GENRA BASS" "SCHLAG" "GENRA MELODY" "GENRA PADS"; do
+          for p in "GENRA CHOP" "SCHLAG"; do
             python genra-chop/tools/build_skin.py "genra-chop/$p"
             python sdk/tools/validate.py "genra-chop/$p"
           done
@@ -39,19 +39,13 @@ jobs:
           native() { ls "$1"/build/native/*.so | head -n 1; }
           sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA CHOP")" test --seconds 3 --notes 36,38,41
           sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA CHOP")" test --seconds 4 --playing --notes 36
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA BASS")" test --seconds 3 --notes 40,43
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA BASS")" test --seconds 4 --playing --notes 40
           sdk/.sdk-tools/host_sim "$(native "genra-chop/SCHLAG")" test --seconds 3 --notes 36,37,38,39
           sdk/.sdk-tools/host_sim "$(native "genra-chop/SCHLAG")" test --seconds 4 --playing --notes 36
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA MELODY")" test --seconds 3 --notes 60,64,67
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA MELODY")" test --seconds 4 --playing --notes 60
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA PADS")" test --seconds 3 --notes 36,37,38
-          sdk/.sdk-tools/host_sim "$(native "genra-chop/GENRA PADS")" test --seconds 4 --playing --notes 36
 
       - name: Put the plugin folders into "VST2 Plugins"
         run: |
           mkdir -p "dist/VST2 Plugins"
-          for p in "GENRA CHOP" "GENRA BASS" "SCHLAG" "GENRA MELODY" "GENRA PADS"; do
+          for p in "GENRA CHOP" "SCHLAG"; do
             cp -r "genra-chop/$p/build/Genra - VST - $p" "dist/VST2 Plugins/"
           done
           find dist -type f | sort | head -n 120

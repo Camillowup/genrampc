@@ -29,6 +29,7 @@
 #include "../../common/genra_link.h"
 #include "../../common/genra_ui.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -41,7 +42,9 @@ using namespace genrafiles;
 namespace {
 
 static const int kVoices = 8, kSlots = 4, kSteps = genralink::kSteps, kRows = 10, kPrintRows = 7;
-static const int kMaxFiles = 24;
+static const int kMaxFiles = 24, kFlashes = 12;
+// MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
+const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
 static const float kMaxSeconds = 2.f;
 const char* const kVoiceNames[kVoices] = {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"};
 enum Func { F_TUNE, F_DECAY, F_DRIVE, F_BITS, F_REPEAT, F_PAN, F_REVERSE, F_FILTER, NUM_FUNCS };
@@ -59,7 +62,9 @@ static const char* const kCaptions[][2] = {
     {"padsinfo", "PADS: only the MPC track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
     {"help2", "pads 1 to 16 in order"}, {"help3", "(pad 1 = bottom left)"},
     {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
-    {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}};
+    {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
+    {"savekit", "SAVE KIT"}, {"kitnotes", "MPC KIT NOTES"}, {"kithelp1", "MIDI ch 10: MPC kit notes"},
+    {"kithelp2", "(A01-A08 = KICK .. PERC)"}, {"kithelp3", "ON: on every channel"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -71,9 +76,9 @@ enum
     P_SOLO0 = P_MUTE0 + kVoices,
     P_FUNC0 = P_SOLO0 + kVoices,          // v * 4 + k
     P_VAL0 = P_FUNC0 + kVoices * kSlots,  // v * 4 + k
-    P_VOLUME = P_VAL0 + kVoices * kSlots, P_AUTO, P_CHOKE, P_VOICE,
+    P_VOLUME = P_VAL0 + kVoices * kSlots, P_AUTO, P_CHOKE, P_VOICE, P_KITNOTES,
     // buttons
-    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, // flashes 0..9
+    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, // flashes 0..11
     P_SCROLL,
     P_FUNCTAP0,                            // v * 4 + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
@@ -92,7 +97,7 @@ enum
     P_LAMP0 = P_CELL0 + kVoices * 16,
     P_PADLIT0 = P_LAMP0 + kVoices,
     P_FLASH0 = P_PADLIT0 + kVoices,
-    P_COUNT = P_FLASH0 + 10
+    P_COUNT = P_FLASH0 + kFlashes
 };
 
 // a sample in memory (16 bit)
@@ -176,7 +181,8 @@ public:
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
         addParam(boolParam("choke", "HAT CHOKE", true));
         addParam(choiceParam("voice", "VOICE", {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"}, 0));
-        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE"})
+        addParam(boolParam("kitnotes", "MPC KIT NOTES", false));
+        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -197,7 +203,7 @@ public:
             for (int j = 0; j < 16; ++j) addText(("ZELLE " + std::to_string(v + 1) + " " + std::to_string(j + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("LAMPE " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("PADLICHT " + std::to_string(v + 1)).c_str());
-        for (int i = 0; i < 10; ++i) addText(("BLITZ " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kFlashes; ++i) addText(("BLITZ " + std::to_string(i + 1)).c_str());
         if (numParams() != P_COUNT) std::abort();
 
         screen_.init();
@@ -205,11 +211,11 @@ public:
         for (int i = 0; i < kNumCaps; ++i) screen_.text(P_CAP0 + i, kCaptions[i][1]);
         for (int i = 0; i < kVoices * 16; ++i) screen_.strip(P_CELL0 + i, 3);
         for (int v = 0; v < kVoices; ++v) { screen_.strip(P_LAMP0 + v, 2); screen_.strip(P_PADLIT0 + v, 2); }
-        for (int i = 0; i < 10; ++i) screen_.button(P_NEW + i, P_FLASH0 + i);
+        for (int i = 0; i < kFlashes; ++i) screen_.button(P_NEW + i, P_FLASH0 + i);
         for (int i = P_FUNCTAP0; i < P_ROWTAP0 + kRows; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "SCHLAG 0.2 · LINK v3");
+        screen_.setText(P_VERSION, "SCHLAG 0.3 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -244,7 +250,7 @@ public:
         i.name = "SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 200;
+        i.version = 300;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -360,6 +366,7 @@ public:
         float* outR = ctx.numOutputs > 1 ? ctx.outputs[1] : nullptr;
         int ev = 0;
         uint32_t lit = 0;
+        const bool kitNotes = getBool(P_KITNOTES);
         for (int i = 0; i < ctx.numFrames; ++i)
         {
             while (ev < ctx.numMidiEvents && ctx.midi[ev].sampleOffset <= i)
@@ -367,7 +374,8 @@ public:
                 const MidiEvent& e = ctx.midi[ev++];
                 if (!e.isNoteOn()) continue;
                 if (pads_.learnNote(e.note())) continue;
-                int pad = pads_.padOf(e.note());
+                // channel 10 (GENRA CHOP OUT, MPC drum notes) or MPC KIT NOTES: A01-A08 = the voices; else the pad map
+                int pad = (e.channel() == 9 || kitNotes) ? kitVoice(e.note()) : pads_.padOf(e.note());
                 if (pad >= 0 && pad < kVoices) trigger(pad, e.velocity() / 127.f, -1, 0);
             }
             for (int k = 0; k < nHits_;)
@@ -479,6 +487,11 @@ private:
             default: if (v >= 99.5f) std::snprintf(b, sizeof b, "open"); else std::snprintf(b, sizeof b, "LP %.1fk", cutoffHz(v) / 1000.f); break;
         }
         return b;
+    }
+    static int kitVoice(int note)
+    {
+        for (int v = 0; v < kVoices; ++v) if (kKitNote[v] == note) return v;
+        return -1;
     }
     static int bitsOf(float v) { return clamp((int)std::lround(4.f + v * 0.12f), 4, 16); }
     static int repeatIndex(float v) { return clamp((int)(v / 25.f), 0, 3); }
@@ -647,6 +660,7 @@ private:
     {
         std::string path = browser_.tap(row);
         if (path.empty()) { previewPath_.clear(); return; }
+        if (hasExt(path, ".kit")) { previewPath_.clear(); loadKit(path); return; }
         int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
         if (path == previewPath_)
         {
@@ -665,6 +679,171 @@ private:
             previewPath_ = path;
             screen_.message(P_LISTINFO, "tap again = the voice's sample");
         }
+    }
+
+    // ------------------------------------------------------------------ worker: SAVE SAMPLE, SAVE KIT, kits
+    // where SAVE writes: the folder open on the FOLDER page, else the voice's folder, else the root folder
+    std::string saveDir(int v)
+    {
+        std::string d = browser_.cwd();
+        if (!d.empty() && d != "*" && isDir(d)) return d;
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            if (!voiceFolder_[v].empty() && isDir(voiceFolder_[v])) return voiceFolder_[v];
+        }
+        return !root_.empty() && isDir(root_) ? root_ : std::string();
+    }
+    static std::string freeName(const std::string& dir, const std::string& stem, const char* ext)
+    {
+        for (int n = 1; n < 1000; ++n)
+        {
+            char b[16];
+            std::snprintf(b, sizeof b, " %02d", n);
+            std::string f = stem + b + ext;
+            if (FILE* x = std::fopen((dir + "/" + f).c_str(), "rb")) std::fclose(x);
+            else return f;
+        }
+        return stem + ext;
+    }
+    static void put16(std::vector<uint8_t>& o, uint32_t v) { o.push_back((uint8_t)v); o.push_back((uint8_t)(v >> 8)); }
+    static void put32(std::vector<uint8_t>& o, uint32_t v) { put16(o, v & 0xffff); put16(o, v >> 16); }
+
+    // the voice's own sample through its functions (TUNE, REVERSE, DECAY, BITS, DRIVE, FILTER, PAN) as a 16-bit WAV
+    void saveSample()
+    {
+        int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
+        Kit* k = kit_[v].load(std::memory_order_acquire); // kits are freed only by this thread
+        if (!k || k->samples.empty()) { screen_.message(P_LISTINFO, "no sample"); return; }
+        const Sample& s = k->samples[(size_t)clamp(k->base, 0, (int)k->samples.size() - 1)];
+        std::string dir = saveDir(v);
+        if (dir.empty()) { screen_.message(P_LISTINFO, "open a folder first"); return; }
+        Player p;
+        p.s = &s;
+        const double sr = s.rate;
+        p.rev = funcValue(v, F_REVERSE, 0.f) >= 50.f;
+        p.rate = std::pow(2.0, (funcValue(v, F_TUNE, 50.f) - 50.f) * 0.24 / 12.0);
+        p.end = (double)s.frames() - 1.0;
+        p.pos = p.rev ? p.end - 1.0 : 0.0;
+        float dec = funcValue(v, F_DECAY, 100.f);
+        p.decayLen = dec >= 99.5f ? 0.f : (float)(std::max(0.03f, dec / 100.f) * s.frames() / p.rate);
+        p.drive = funcValue(v, F_DRIVE, 0.f) / 100.f;
+        p.bits = bitsOf(funcValue(v, F_BITS, 100.f));
+        float fc = funcValue(v, F_FILTER, 100.f);
+        p.fa = fc >= 99.5f ? 1.f : 1.f - std::exp(-2.f * 3.14159265f * cutoffHz(fc) / (float)sr);
+        float pan = (funcValue(v, F_PAN, 50.f) - 50.f) / 50.f;
+        p.panL = std::min(1.f, std::sqrt(0.5f * (1.f - pan)) * 1.4142f);
+        p.panR = std::min(1.f, std::sqrt(0.5f * (1.f + pan)) * 1.4142f);
+        std::vector<float> L, Rr;
+        float a, b;
+        while (sampleAt(p, a, b) && L.size() < (size_t)(sr * 8.0))
+        {
+            float env = 1.f;
+            if (p.decayLen > 0.f) { env = std::max(0.f, 1.f - p.age / p.decayLen); if (env <= 0.f) break; }
+            if (p.bits < 16) { float q = (float)(1 << (p.bits - 1)); a = std::round(a * q) / q; b = std::round(b * q) / q; }
+            if (p.drive > 0.01f) { float d = 1.f + 8.f * p.drive; a = std::tanh(a * d) / std::tanh(d); b = std::tanh(b * d) / std::tanh(d); }
+            if (p.fa < 1.f) { p.zl += p.fa * (a - p.zl); p.zr += p.fa * (b - p.zr); a = p.zl; b = p.zr; }
+            L.push_back(a * env * p.panL);
+            Rr.push_back(b * env * p.panR);
+            p.pos += p.rev ? -p.rate : p.rate;
+            ++p.age;
+        }
+        if (L.empty()) { screen_.message(P_LISTINFO, "nothing to save"); return; }
+        for (size_t i = 0; i < 64 && i < L.size(); ++i) { size_t j = L.size() - 1 - i; L[j] *= i / 64.f; Rr[j] *= i / 64.f; }
+        const uint32_t n = (uint32_t)L.size(), rate = (uint32_t)std::lround(sr);
+        std::vector<uint8_t> w;
+        w.insert(w.end(), {'R', 'I', 'F', 'F'}); put32(w, 36 + n * 4);
+        w.insert(w.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '}); put32(w, 16); put16(w, 1); put16(w, 2);
+        put32(w, rate); put32(w, rate * 4); put16(w, 4); put16(w, 16);
+        w.insert(w.end(), {'d', 'a', 't', 'a'}); put32(w, n * 4);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            put16(w, (uint16_t)(int16_t)std::lround(std::max(-1.f, std::min(1.f, L[i])) * 32767.f));
+            put16(w, (uint16_t)(int16_t)std::lround(std::max(-1.f, std::min(1.f, Rr[i])) * 32767.f));
+        }
+        std::string stem = stripWav(s.name);
+        if (stem.size() > 20) stem.resize(20);
+        std::string f = freeName(dir, stem, ".wav");
+        if (writeFileBytes(dir + "/" + f, w.data(), w.size()))
+        {
+            if (browser_.cwd() == dir) browser_.list(dir + "/" + f);
+            screen_.message(P_LISTINFO, "saved: " + stripWav(f), 4000);
+        }
+        else screen_.message(P_LISTINFO, "Error while writing");
+    }
+
+    // a kit: every voice's folder and sample, RANDOM, LEVEL and its four functions
+    void saveKit()
+    {
+        std::string dir = saveDir(clamp(getInt(P_VOICE), 0, kVoices - 1));
+        if (dir.empty()) { screen_.message(P_LISTINFO, "open a folder first"); return; }
+        std::string t = "SGK1\n";
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            for (int v = 0; v < kVoices; ++v)
+            {
+                char b[64];
+                t += voiceFolder_[v] + "\t" + voiceFile_[v];
+                std::snprintf(b, sizeof b, "\t%.2f\t%.2f", get(P_RANDOM0 + v), get(P_LEVEL0 + v));
+                t += b;
+                for (int k = 0; k < kSlots; ++k)
+                {
+                    std::snprintf(b, sizeof b, "\t%d\t%.2f", getInt(P_FUNC0 + v * kSlots + k), get(P_VAL0 + v * kSlots + k));
+                    t += b;
+                }
+                t += "\n";
+            }
+        }
+        std::string f = freeName(dir, "Kit", ".kit");
+        if (writeFileBytes(dir + "/" + f, t.data(), t.size()))
+        {
+            if (browser_.cwd() == dir) browser_.list(dir + "/" + f);
+            screen_.message(P_LISTINFO, "saved: " + f.substr(0, f.size() - 4), 4000);
+        }
+        else screen_.message(P_LISTINFO, "Error while writing");
+    }
+
+    void setParam(int i, float x) { set(i, x); notifyHostParameterChanged(i); }
+
+    void loadKit(const std::string& path)
+    {
+        std::string t;
+        if (FILE* fp = std::fopen(path.c_str(), "rb"))
+        {
+            char buf[4096];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, fp)) > 0) t.append(buf, n);
+            std::fclose(fp);
+        }
+        if (t.compare(0, 5, "SGK1\n") != 0) { screen_.message(P_LISTINFO, "not a SCHLAG kit"); return; }
+        size_t pos = 5;
+        int missing = 0;
+        for (int v = 0; v < kVoices && pos < t.size(); ++v)
+        {
+            size_t e = t.find('\n', pos);
+            std::string line = t.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+            pos = e == std::string::npos ? t.size() : e + 1;
+            std::vector<std::string> c;
+            size_t a = 0;
+            for (;;) { size_t b = line.find('\t', a); c.push_back(line.substr(a, b == std::string::npos ? std::string::npos : b - a)); if (b == std::string::npos) break; a = b + 1; }
+            if (c.size() < 4 + 2 * kSlots) continue;
+            if (!c[0].empty() && !isDir(c[0])) ++missing;
+            {
+                std::lock_guard<std::mutex> g(mtx_);
+                voiceFolder_[v] = c[0];
+                voiceFile_[v] = c[1];
+                loadReq_[v] = !c[0].empty();
+            }
+            setParam(P_RANDOM0 + v, (float)std::atof(c[2].c_str()));
+            setParam(P_LEVEL0 + v, (float)std::atof(c[3].c_str()));
+            for (int k = 0; k < kSlots; ++k)
+            {
+                setParam(P_FUNC0 + v * kSlots + k, (float)clamp(std::atoi(c[4 + 2 * k].c_str()), 0, NUM_FUNCS - 1));
+                setParam(P_VAL0 + v * kSlots + k, (float)std::atof(c[5 + 2 * k].c_str()));
+            }
+        }
+        std::string name = baseName(path);
+        name = name.substr(0, name.size() - 4);
+        screen_.message(P_LISTINFO, missing ? name + ": " + std::to_string(missing) + " folders missing" : name + " loaded", 4000);
     }
 
     // ------------------------------------------------------------------ worker: screen
@@ -795,6 +974,7 @@ private:
     {
         root_ = settings_.get("root");
         browser_.rows = kRows;
+        browser_.extra = ".kit";
         browser_.open(!root_.empty() ? root_ : settings_.get("lastdir"));
         uint32_t lastSeq = 1;
         genralink::Loop tmp;
@@ -849,6 +1029,8 @@ private:
                     screen_.message(P_STATUS, "BASIC: every voice on its sample");
                 }
                 else if (p == P_PRINT) print(L);
+                else if (p == P_SAVESMP) saveSample();
+                else if (p == P_SAVEKIT) saveKit();
                 else if (p == P_LEARN) pads_.startLearning();
                 else if (p == P_BACK) { browser_.up(); previewPath_.clear(); }
                 else if (p == P_DRVBTN) { browser_.drives(); previewPath_.clear(); }
