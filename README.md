@@ -12,7 +12,7 @@ plugins, one per track: **GENRA CHOP** (the sample chopper from the VCV Rack plu
 | Folder | What |
 |---|---|
 | `chop-test/` | **Archive** (no longer built): the mini test `CHOP TEST` (load a WAV from the SSD, chop it with the GENRA CHOP engine, play the chops on the pads) and `CHOP LINK` (a second plugin on another track that follows CHOP TEST). See [chop-test/README.md](chop-test/README.md). |
-| `genra-chop/` | **GENRA CHOP 0.3** (the chopper and chef: loops in 29 styles on the MPC's transport), **GENRA BASS 0.3** (bass), **SCHLAG 0.2** (8-voice drum random sampler), **GENRA MELODY 0.1** (melody) and **GENRA PADS 0.1** (chords, also on the 16 pads), linked over LINK v3, each in the colours of a limited-edition MPC. See [genra-chop/README.md](genra-chop/README.md). Artifact **genra-mpc**. |
+| `genra-chop/` | **GENRA CHOP 0.4** (with MIDI OUT per lane) (the chopper and chef: loops in 29 styles on the MPC's transport), **GENRA BASS 0.4** (bass), **SCHLAG 0.2** (8-voice drum random sampler), **GENRA MELODY 0.1** (melody) and **GENRA PADS 0.1** (chords, also on the 16 pads), linked over LINK v3, each in the colours of a limited-edition MPC. See [genra-chop/README.md](genra-chop/README.md). Artifact **genra-mpc**. |
 | `sdk/` | A copy of Akai's MPC Plugin SDK (MIT). One change: `tools/build.py` links `-lpthread` (our plugins run a worker thread). |
 
 ## Install on the MPC

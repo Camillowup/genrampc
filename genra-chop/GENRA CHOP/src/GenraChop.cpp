@@ -28,6 +28,7 @@
 #include "Chop.hpp"
 #include "../../common/genra_files.h"
 #include "../../common/genra_link.h"
+#include "../../common/genra_midiout.h"
 #include "../../common/genra_ui.h"
 
 #include <algorithm>
@@ -127,6 +128,11 @@ struct Trig { double at; int chop; float vel; int pitch; bool rev; double gate; 
 struct Seq
 {
     hh::ChopEv ev[hh::LEN];
+    // MIDI OUT: the other lanes of the loop (bass and melody lengths in steps, slides already reaching the next note)
+    hh::Note bass[hh::LEN], mel[hh::LEN];
+    float bassLen[hh::LEN] = {}, melLen[hh::LEN] = {};
+    hh::PadEv pad[hh::LEN];
+    hh::Hit drum[hh::DRUMS][hh::LEN];
     float swing = 0.5f;
 };
 
@@ -295,7 +301,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 300;
+        i.version = 400;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -311,6 +317,7 @@ public:
             started_ = true;
             link_.open();
             pads_.load();
+            midi_.open("GENRA CHOP");
             settings_.load();
             set(P_BANK, 0.f);
             bankReset_.store(true);
@@ -390,7 +397,11 @@ public:
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
                 double at = (nextStep_ - q0) * spStep;
-                if (seq_ && autoMode) scheduleStep(seq_->ev[s], s, (uint32_t)(n / kSteps), at, spStep, seq_->swing);
+                if (seq_ && autoMode)
+                {
+                    scheduleStep(seq_->ev[s], s, (uint32_t)(n / kSteps), at, spStep, seq_->swing);
+                    scheduleMidi(*seq_, s, (uint32_t)(n / kSteps), at, spStep);
+                }
                 nextStep_ += 1.0;
             }
             wasPlaying_ = true;
@@ -400,6 +411,7 @@ public:
             if (wasPlaying_)
                 for (Voice& v : voices_) if (v.active && v.seq && v.release < 0) v.release = kFadeOut;
             nTrig_ = 0;
+            if (wasPlaying_) { midi_.allOff(); nMidi_ = 0; }
             wasPlaying_ = false;
             curStep_.store(-1, std::memory_order_relaxed);
             if (L) L->step.store(-1, std::memory_order_relaxed);
@@ -452,6 +464,7 @@ public:
             if (outR) outR[i] = r * gainSmooth_;
         }
         for (int t = 0; t < nTrig_; ++t) trig_[t].at -= ctx.numFrames;
+        flushMidi(ctx.numFrames);
         uint64_t mask = 0;
         for (const Voice& v : voices_) if (v.active && v.release < 0 && v.chop >= 0 && v.chop < 64) mask |= (uint64_t)1 << v.chop;
         playingMask_.store(mask, std::memory_order_relaxed);
@@ -581,7 +594,81 @@ private:
             t.pitch = e.pitch;
             t.rev = e.rev;
             t.gate = r > 1 ? spStep / r : gate;
+            // channel 1: the chop as the note of its pad (the pad map of the GENRA plugins)
+            queueMidi(t.at, t.at + t.gate * 0.95, kChChops, pads_.noteOf(e.pad % kPads), t.vel);
         }
+    }
+
+    // ------------------------------------------------------------------ MIDI OUT (GENRA CHOP OUT)
+    // channel 1 chops, 2 bass, 3 melody, 4 pads, 10 drums (the pad map's notes, voice order KICK .. PERC)
+    static const int kChChops = 0, kChBass = 1, kChMel = 2, kChPads = 3, kChDrums = 9;
+    struct MidiEv { double at; uint8_t ch, note, vel; bool on; };
+
+    void queueMidi(double on, double off, int ch, int note, float vel)
+    {
+        if (!midi_.ok() || note < 0 || note > 127 || nMidi_ + 2 > (int)(sizeof(midiQ_) / sizeof(midiQ_[0]))) return;
+        uint8_t v = (uint8_t)clamp((int)std::lround(vel * 127.f), 1, 127);
+        midiQ_[nMidi_++] = {on, (uint8_t)ch, (uint8_t)note, v, true};
+        midiQ_[nMidi_++] = {std::max(on + 1.0, off), (uint8_t)ch, (uint8_t)note, 0, false};
+    }
+
+    void scheduleMidi(const Seq& q, int s, uint32_t round, double at, double spStep)
+    {
+        if (!midi_.ok()) return;
+        const double sw = (s & 1) ? (q.swing - 0.5f) * 2.f * spStep : 0.0;
+        auto plays = [&](float chance, uint8_t cond, uint32_t seed) {
+            if (cond == 1 && (round & 1u)) return false;
+            return chance >= 1.f || hh::hash01((uint32_t)s, round, seed) < chance;
+        };
+        const hh::Note& b = q.bass[s];
+        if (b.pitch >= 0 && plays(b.chance, b.cond, 101u))
+        {
+            double t = at + sw + std::max(0.f, b.off) * spStep;
+            queueMidi(t, t + q.bassLen[s] * spStep, kChBass, b.pitch, std::min(1.f, b.vel * (b.acc ? 1.f : 0.85f)));
+        }
+        const hh::Note& m = q.mel[s];
+        if (m.pitch >= 0 && plays(m.chance, m.cond, 102u))
+        {
+            double t = at + sw + std::max(0.f, m.off) * spStep;
+            queueMidi(t, t + q.melLen[s] * spStep, kChMel, m.pitch, std::min(1.f, m.vel * (m.acc ? 1.f : 0.85f)));
+        }
+        const hh::PadEv& p = q.pad[s];
+        if (p.pitch[0] >= 0 && plays(p.chance, p.cond, 103u))
+        {
+            double t = at + sw + std::max(0.f, p.off) * spStep;
+            for (int v = 0; v < hh::PAD_VOICES; ++v)
+                if (p.pitch[v] >= 0) queueMidi(t, t + std::max(0.5f, p.len) * spStep * 0.98, kChPads, p.pitch[v], p.vel);
+        }
+        for (int d = 0; d < hh::DRUMS; ++d)
+        {
+            const hh::Hit& h = q.drum[d][s];
+            if (h.vel <= 0.f || !plays(h.chance, h.cond, 110u + (uint32_t)d)) continue;
+            double t = at + sw + std::max(0.f, h.off) * spStep;
+            int r = std::max(1, (int)h.ratchet);
+            for (int k = 0; k < r; ++k)
+            {
+                double tk = t + k * spStep / r;
+                queueMidi(tk, tk + 0.45 * spStep / r, kChDrums, pads_.noteOf(d), h.vel * (k ? 0.75f : 1.f));
+            }
+        }
+    }
+
+    // send what is due in this block (note-offs first), keep the rest for the next blocks
+    void flushMidi(int frames)
+    {
+        for (int pass = 0; pass < 2; ++pass)
+            for (int k = 0; k < nMidi_;)
+            {
+                MidiEv& e = midiQ_[k];
+                if (e.at < (double)frames && e.on == (pass == 1))
+                {
+                    if (e.on) midi_.noteOn(e.note, e.vel, e.ch);
+                    else midi_.noteOff(e.note, e.ch);
+                    midiQ_[k] = midiQ_[--nMidi_];
+                }
+                else ++k;
+            }
+        for (int k = 0; k < nMidi_; ++k) midiQ_[k].at -= frames;
     }
 
     void startVoice(int chop, float vel, int pitch, bool rev, double gate, bool fromSeq)
@@ -857,7 +944,27 @@ private:
             savedPattern_ = pat_;
         }
         Seq* s = new Seq();
-        for (int i = 0; i < kSteps; ++i) s->ev[i] = rend_.chop[i];
+        for (int i = 0; i < kSteps; ++i)
+        {
+            s->ev[i] = rend_.chop[i];
+            s->bass[i] = rend_.bass[i];
+            s->mel[i] = rend_.mel[i];
+            s->pad[i] = rend_.pad[i];
+            for (int d = 0; d < hh::DRUMS; ++d) s->drum[d][i] = rend_.drum[d][i];
+        }
+        // MIDI lengths: a note that slides into the next one overlaps it (legato), so the MPC glides too
+        for (int i = 0; i < kSteps; ++i)
+        {
+            for (int lane = 0; lane < 2; ++lane)
+            {
+                const hh::Note* line = lane ? s->mel : s->bass;
+                float* len = lane ? s->melLen : s->bassLen;
+                if (line[i].pitch < 0) { len[i] = 0.f; continue; }
+                len[i] = std::max(0.2f, line[i].len) * 0.95f;
+                for (int k = i + 1; k < kSteps && k <= i + 16; ++k)
+                    if (line[k].pitch >= 0) { if (line[k].slide) len[i] = std::max(len[i], (float)(k - i) + 0.25f); break; }
+            }
+        }
         s->swing = hh::STYLES[clamp(set_.style, 0, hh::NUM_STYLES - 1)].swing;
         for (auto& r : seqRetired_) delete r.exchange(nullptr);
         delete seqPending_.exchange(s, std::memory_order_acq_rel);
@@ -1106,8 +1213,11 @@ private:
             screen_.setText(P_LANETXT0 + k, name);
         }
         linked_ = alive;
+        // LINK and MIDI OUT share the row: "2 linked · OUT 130:0 · 512"
+        std::string out = midi_.ok() ? "OUT " + midi_.status().substr(midi_.status().find("OUT ") + 4) + " · " + std::to_string(midi_.sent())
+                                     : "MIDI off: " + midi_.status();
         if (!L) screen_.setText(P_LINKINFO, "Error: " + link_.error());
-        else screen_.setText(P_LINKINFO, alive ? std::to_string(alive) + " plugin(s) linked" : std::string("no companion plugin"));
+        else screen_.setText(P_LINKINFO, (alive ? std::to_string(alive) + " linked · " : std::string()) + out);
     }
 
     void newLane(int k)
@@ -1320,6 +1430,9 @@ private:
     double sr_ = 44100.0;
     double nextStep_ = 0.0;
     bool wasPlaying_ = false;
+    genramidi::Out midi_;
+    MidiEv midiQ_[1024];
+    int nMidi_ = 0;
     float gainSmooth_ = -1.f;
     int slotTapSeen_[kPads] = {};
     // shared with the audio thread (lock-free)

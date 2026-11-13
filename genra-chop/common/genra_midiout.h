@@ -64,12 +64,14 @@ public:
     bool ok() const { return ok_.load(); }
     const std::string& status() const { return status_; }
 
-    void noteOn(int note, int vel, int ch = 0) { send(kNoteOn, note, vel, ch); held_[note & 127] = true; }
-    void noteOff(int note, int ch = 0) { send(kNoteOff, note, 0, ch); held_[note & 127] = false; }
-    void allOff(int ch = 0)
+    void noteOn(int note, int vel, int ch = 0) { send(kNoteOn, note, vel, ch); held_[ch & 15][note & 127] = true; }
+    void noteOff(int note, int ch = 0) { send(kNoteOff, note, 0, ch); held_[ch & 15][note & 127] = false; }
+    // every note still held, on every channel
+    void allOff()
     {
-        for (int n = 0; n < 128; ++n)
-            if (held_[n]) noteOff(n, ch);
+        for (int c = 0; c < 16; ++c)
+            for (int n = 0; n < 128; ++n)
+                if (held_[c][n]) noteOff(n, c);
     }
     long sent() const { return sent_; }
 
@@ -124,7 +126,7 @@ private:
     int port_ = -1, client_ = -1;
     std::atomic<bool> ok_{false};
     std::string status_ = "not open";
-    bool held_[128] = {};
+    bool held_[16][128] = {};
     long sent_ = 0;
 };
 

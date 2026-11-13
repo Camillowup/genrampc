@@ -210,6 +210,17 @@ class Images:
             return i
         return self._write("box_%02x%02x%02x_%dx%d%s.png" % (rgb + (w, h, "_d%d" % dead if dead else "")), make)
 
+    def state(self, lit, n, w, h, radius=6):
+        """A switch's state as an n-frame strip: frame `lit` red (on), the others grey (off)."""
+        def make():
+            fr = []
+            for f in range(n):
+                i = Img(w, h)
+                i.rect(0, 0, w, h, RED if f == lit else KEY_OFF, min(radius, w // 2, h // 2))
+                fr.append(i)
+            return strip(fr)
+        return self._write("state_%d_%d_%02x%02x%02x_%02x%02x%02x_%dx%d.png" % ((lit, n) + RED + KEY_OFF + (w, h)), make)
+
     def clear(self, w, h):
         return self._write("clear_%dx%d.png" % (w, h), lambda: Img(w, h))
 
@@ -387,17 +398,21 @@ class Page:
         self.caption(cap, b, height, L_WHITE, CENTRED)
         self.button(param, b)
 
+    # Switches: the state is a film strip under the caption, the button on top is transparent. A caption lying on top
+    # of a button swallows the tap on the MPC (the switches did not react), so the button must be the last layer.
     def toggle(self, param, cap, b, height=20.0):
         x, y, w, h = [int(v) for v in b.split()]
-        self.button(param, b, 1, 1, self.img.box(RED, w, h), self.img.box(KEY_OFF, w, h))
+        self.film(self.img.state(1, 2, w, h), 2, param, b)
         self.caption(cap, b, height, L_WHITE, CENTRED)
+        self.button(param, b, 1, 1)
 
     def radio(self, param, caps, xs, y, w, h, height=22.0):
-        on, off = self.img.box(RED, w, h), self.img.box(KEY_OFF, w, h)
+        n = len(caps)
         for i, (cap, x) in enumerate(zip(caps, xs)):
             b = "%d %d %d %d" % (x, y, w, h)
-            self.button(param, b, button_id=i, group=len(caps), on_png=on, off_png=off)
+            self.film(self.img.state(i, n, w, h), n, param, b)
             self.caption(cap, b, height, L_WHITE, CENTRED)
+            self.button(param, b, button_id=i, group=n)
 
     def box(self, rgb, b, radius=6, dead=0):
         x, y, w, h = [int(v) for v in b.split()]

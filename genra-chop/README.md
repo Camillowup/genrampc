@@ -10,7 +10,7 @@ On the MPC, GENRA is a set of five plugins, one per track:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.3 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, SAVE WAV | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA CHOP** 0.4 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, SAVE WAV, MIDI OUT of every lane | retro cream, green LCD (MPC60 / MPC Live II Retro) |
 | **GENRA BASS** 0.4 | bass | Plays and shapes the bass line: RHYTHM, NOTES, DENSITY, KEY LOCK, 36 presets (808, SUB, UPRIGHT, E-BASS, REESE, ACID) | white, grey display (MPC2500 LE) |
 | **SCHLAG** 0.2 | drums | 8-voice drum random sampler: every voice rolls its samples from a folder (RANDOM ring), 4 function slots per voice | black, grey display (MPC3000 LE) |
 | **GENRA MELODY** 0.1 | melody | Plays and shapes the melody (monophonic): RHYTHM, NOTES, RANGE, slides and accents, 36 presets (KEYS, RHODES, PLUCK, LEAD, BELL, FLUTE) | blue, grey display (MPC1000 / MPC One G2) |
@@ -48,6 +48,11 @@ next bar. Every panel, page and message is in English.
   **REV** (the selected chop backwards) and **LOCK** (the chop keeps its pad on NEW), PITCH / DECAY / FILTER / LEVEL,
   STATUS, SAVE WAV. Chop slots show R / L for reversed / locked.
 - **PRINT**, **SETUP** (LEARN, pad map, drives, writing, LINK, analysis, save folder).
+- **MIDI OUT (test in 0.4)**: every lane of the loop also goes to one ALSA sequencer port **GENRA CHOP OUT**, one
+  MIDI channel per lane: **ch 1 chops**, **ch 2 bass**, **ch 3 melody**, **ch 4 pads/chords**, **ch 10 drums** (the
+  notes of the learned pad map, so SCHLAG and MPC drum programs hit the same pads). On the MPC, any track can play
+  or record a lane: track MIDI input = GENRA CHOP OUT, channel = the lane. Never set GENRA CHOP's own track to its
+  own port. SETUP shows the port (e.g. `OUT 130:0`) and a counter of sent notes.
 
 ## GENRA BASS (instrument, another track)
 
