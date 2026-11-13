@@ -66,24 +66,29 @@ static const char* const kCaptions[][2] = {
     {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
     {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
-    {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}};
+    {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
+    {"clear", "CLEAR"}, {"rec", "● REC"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
 static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "UNDO",
     "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK",
-    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD"};
+    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR",
+    "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4", "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"};
 static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
 
 enum
 {
     P_PITCH = 0, P_DECAY, P_FILTER, P_LEVEL,
-    P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH,
+    P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH, P_REC,
+    P_LANEMODE0,                       // per lane: DRUMS KIT/BREAK/BOTH, BASS FOLLOW.., MELODY STAB.., PADS SUSTAIN..
+    P_DENS0 = P_LANEMODE0 + kLanes,    // per lane: DENSITY 0..100 % (50 = the style)
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
-    P_NEWALL, P_NEW0,
+    P_NEWALL = P_DENS0 + kLanes, P_NEW0,
     P_UNDO = P_NEW0 + kLanes, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
-    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD,
-    P_REVBTN, P_LOCKBTN, P_SCROLL,
+    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR,
+    P_MODEPREV0, P_MODENEXT0 = P_MODEPREV0 + kLanes,
+    P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_SCROLL,
     P_ROWTAP0,
     P_SLOTTAP0 = P_ROWTAP0 + kRows,
     // texts
@@ -223,14 +228,29 @@ public:
         addParam(choiceParam("view", "VIEW", {"Sample", "Loop", "Chop"}, 0));
         addParam(boolParam("choke", "CHOKE", true));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
-        addParam(choiceParam("length", "LENGTH", {"1 bar", "2 bars", "4 bars", "8 bars"}, 2));
+        addParam(choiceParam("length", "LENGTH", {"Auto", "1 bar", "2 bars", "4 bars", "8 bars"}, 0));
+        addParam(boolParam("rec", "REC", false));
+        addParam(choiceParam("drummode", "DRUM MODE", {hh::DRUM_MODES, hh::DRUM_MODES + 3}, 0));
+        addParam(choiceParam("bassmode", "BASS MODE", {hh::BASS_MODES, hh::BASS_MODES + 4}, 0));
+        addParam(choiceParam("melmode", "MELODY MODE", {hh::MEL_MODES, hh::MEL_MODES + 4}, 0));
+        addParam(choiceParam("padmode", "PADS MODE", {hh::PAD_MODES, hh::PAD_MODES + 3}, 0));
+        for (const char* d : {"DENS DRUMS", "DENS BASS", "DENS MELODY", "DENS PADS"})
+        {
+            std::string id = d;
+            for (char& c : id) c = c == ' ' ? '_' : (char)::tolower((unsigned char)c);
+            addParam(floatParam(id.c_str(), d, 0.f, 100.f, 50.f, "%", 0));
+        }
         const char* lanes[kLanes] = {"DRUMS", "BASS", "MELODY", "PADS"};
         addButton("NEW ALL");
         for (int k = 0; k < kLanes; ++k) addButton((std::string("NEW ") + lanes[k]).c_str());
         for (const char* b : {"UNDO", "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT",
                               "LEARN", "BACK", "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE",
-                              "PRINT HERE", "PRINT STANDARD", "REV", "LOCK"})
+                              "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR"})
             addButton(b);
+        for (const char* d : {"MODE BACK", "MODE NEXT"})
+            for (int k = 0; k < kLanes; ++k) addButton((std::string(d) + " " + std::to_string(k + 1)).c_str());
+        addButton("REV");
+        addButton("LOCK");
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int i = 0; i < kRows; ++i) addButton(("TIPP " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
@@ -275,6 +295,7 @@ public:
         for (int i = 0; i < kRows; ++i) screen_.button(P_ROWTAP0 + i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
+        screen_.watch(P_REC);
 
         for (auto& r : retired_) r.store(nullptr);
         hostCycle_[0].store(0.0);
@@ -309,7 +330,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 500;
+        i.version = 600;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -373,13 +394,29 @@ public:
         hostCycle_[1].store(tr.cycleEndPpq, std::memory_order_relaxed);
         hostBar_.store(tr.barStartPpq, std::memory_order_relaxed);
         hostSig_.store(tr.timeSigNumerator * 100 + tr.timeSigDenominator, std::memory_order_relaxed);
+        hostPlaying_.store(playing, std::memory_order_relaxed);
+        // LENGTH: AUTO follows the MPC sequence's loop (the cycle it reports), else 1 / 2 / 4 / 8 bars
+        {
+            static const long k[5] = {64, 16, 32, 64, 128};
+            const int lm = clamp(getInt(P_LENGTH), 0, 4);
+            loopLen_ = k[lm];
+            loopStart_ = 0;
+            if (lm == 0 && tr.cycling && tr.cycleEndPpq > tr.cycleStartPpq + 0.2)
+            {
+                loopLen_ = clamp((long)std::lround((tr.cycleEndPpq - tr.cycleStartPpq) * 4.0), 4L, 1024L);
+                loopStart_ = (long)std::lround(tr.cycleStartPpq * 4.0);
+            }
+            loopLenShown_.store((int)loopLen_, std::memory_order_relaxed);
+            loopStartShown_.store(loopStart_, std::memory_order_relaxed);
+        }
 
         genralink::LinkData* L = link_.data();
         const double bpm = tr.tempoValid && tr.bpm > 1.0 ? tr.bpm : 120.0;
         if (tr.tempoValid) hostBpmX100_.store((int)std::lround(tr.bpm * 100.0), std::memory_order_relaxed);
         if (L)
         {
-            L->loopSteps.store((int32_t)loopSteps(), std::memory_order_relaxed);
+            L->loopSteps.store((int32_t)loopLen_, std::memory_order_relaxed);
+            L->loopStart.store((int32_t)loopStart_, std::memory_order_relaxed);
             L->writerBeat.fetch_add(1, std::memory_order_relaxed);
             if (tr.tempoValid) L->bpmX100.store((int32_t)std::lround(tr.bpm * 100.0), std::memory_order_relaxed);
         }
@@ -398,16 +435,25 @@ public:
         }
 
         const double spStep = sr_ * 60.0 / bpm / 4.0;
+        // REC: armed + playing; the first bar after the start (or after arming) is the count-in
+        const bool recOn = getBool(P_REC);
+        const double recQ0 = playing ? tr.ppqPos * 4.0 : 0.0;
+        if (recOn && playing && (!recWas_ || !wasPlaying_))
+            recFrom_ = std::ceil(recQ0 / hh::STEPS - 1e-6) * hh::STEPS + hh::STEPS;
+        recWas_ = recOn && playing;
+        const bool recording = recOn && playing;
+        recState_.store(!recOn ? 0 : !playing ? 1 : recQ0 < recFrom_ - 0.5 ? 2 : 3, std::memory_order_relaxed);
+        recFromShared_.store(recFrom_, std::memory_order_relaxed);
         if (playing && seq_)
         {
             const double q0 = tr.ppqPos * 4.0;
             const double q1 = q0 + ctx.numFrames / spStep;
             if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0) nextStep_ = std::ceil(q0 - 1e-6);
-            const long len = loopSteps();
+            const long len = loopLen_;
             while (nextStep_ < q1)
             {
-                long n = (long)std::llround(nextStep_);
-                // LENGTH: 1, 2 or 4 bars of the loop, then from the start; 8 bars = the 4 bars twice.
+                long n = (long)std::llround(nextStep_) - loopStart_;
+                // LENGTH: the loop's first bars (1, 2, 3 ..), then from the start; longer: the 4 bars again.
                 // A new loop (NEW, STYLE) starts at the end of the pattern.
                 long pos = ((n % len) + len) % len;
                 int s = (int)(pos % kSteps);
@@ -417,8 +463,9 @@ public:
                 double at = (nextStep_ - q0) * spStep;
                 if (seq_ && autoMode)
                 {
-                    scheduleStep(seq_->ev[s], s, (uint32_t)(n / kSteps), at, spStep, seq_->swing);
-                    scheduleMidi(*seq_, s, (uint32_t)(n / kSteps), at, spStep);
+                    const uint32_t pass = (uint32_t)((n - pos) / len);
+                    scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
+                    scheduleMidi(*seq_, s, pass, at, spStep);
                 }
                 nextStep_ += 1.0;
             }
@@ -440,14 +487,17 @@ public:
         float* outL = ctx.outputs[0];
         float* outR = ctx.numOutputs > 1 ? ctx.outputs[1] : nullptr;
         int ev = 0;
-        const bool followView = getInt(P_VIEW) == 2;
         const double previewRate = preview_ ? (double)preview_->sampleRate / sr_ : 1.0;
         for (int i = 0; i < ctx.numFrames; ++i)
         {
             while (ev < ctx.numMidiEvents && ctx.midi[ev].sampleOffset <= i)
             {
                 const MidiEvent& e = ctx.midi[ev++];
-                if (e.isNoteOn()) noteOn(e.note(), e.velocity() / 127.f, bank, followView);
+                if (e.isNoteOn())
+                {
+                    int chop = noteOn(e.note(), e.velocity() / 127.f, bank, true);
+                    if (chop >= 0 && recording) recordHit(chop, e.velocity() / 127.f, recQ0 + i / spStep);
+                }
                 else if (e.isAllNotesOff())
                     for (Voice& v : voices_) if (v.active && v.release < 0) v.release = kFadeOut;
             }
@@ -535,9 +585,7 @@ public:
                 restoredLock_[c] = v[5] > 0.5f;
             }
         }
-        pathRequest_ = true;
-        set(P_BANK, 0.f);
-        bankReset_.store(true);
+        pathRequest_ = true; // (the saved BANK stays)
         resyncReq_.store(true);
     }
 
@@ -584,14 +632,26 @@ private:
     }
 
     // ------------------------------------------------------------------ audio helpers
-    void noteOn(int note, float vel, int bank, bool select)
+    // a pad: plays its chop and always selects it (REV, LOCK, PITCH .. act on the pad played last)
+    int noteOn(int note, float vel, int bank, bool select)
     {
-        if (pads_.learnNote(note)) return;
+        if (pads_.learnNote(note)) return -1;
         int pad = pads_.padOf(note);
-        if (pad < 0) return;
+        if (pad < 0) return -1;
         int chop = pad + kPads * bank;
         if (select) selReq_.store(chop, std::memory_order_relaxed);
         startVoice(chop, vel, 0, false, -1.0, false);
+        return chop;
+    }
+
+    // REC (audio thread): a pad hit, its position in steps on the MPC's time line, for the worker
+    void recordHit(int chop, float vel, double q)
+    {
+        if (q < recFrom_ - 0.5) return; // still the count-in
+        int w = recW_.load(std::memory_order_relaxed);
+        if (w - recR_.load(std::memory_order_acquire) >= kRecQ) return;
+        recQ_[w % kRecQ] = {chop, vel, q};
+        recW_.store(w + 1, std::memory_order_release);
     }
 
     void scheduleStep(const hh::ChopEv& e, int s, uint32_t round, double at, double spStep, float swing)
@@ -768,11 +828,6 @@ private:
         }
     }
 
-    long loopSteps() const
-    {
-        static const long k[4] = {16, 32, 64, 128};
-        return k[clamp(getInt(P_LENGTH), 0, 3)];
-    }
 
     void swapSeq()
     {
@@ -943,6 +998,13 @@ private:
             else if (track < kLanes) { laneUndo_[track] = pat_; laneHasUndo_[track] = true; }
         }
         set_.style = clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1);
+        set_.drumMode = clamp(getInt(P_LANEMODE0 + 0), 0, 2);
+        set_.bassMode = clamp(getInt(P_LANEMODE0 + 1), 0, 3);
+        set_.melMode = clamp(getInt(P_LANEMODE0 + 2), 0, 3);
+        set_.padMode = clamp(getInt(P_LANEMODE0 + 3), 0, 2);
+        // DENSITY: what NEW takes along (a lane's NEW only its own lane's)
+        for (int k = 0; k < kLanes; ++k)
+            if (track < 0 || track == k) knobs_.dens[k] = clamp(get(P_DENS0 + k), 0.f, 100.f) / 100.f;
         set_.key = info_.key;
         set_.keyAuto = true;
         seed_ = seed_ * 1664525u + 1013904223u;
@@ -1198,10 +1260,15 @@ private:
             screen_.setFrame(P_LOCKLIT, padSet_[s].lock ? 1 : 0);
         }
         else screen_.setText(P_STATUS, "no sample");
+        int rs = recState_.load();
+        if (rs == 1) screen_.setText(P_STATUS, "REC armed: press Play");
+        else if (rs == 2) screen_.setText(P_STATUS, "REC: count-in ...");
+        else if (rs == 3) screen_.setText(P_STATUS, "REC: play your chops (UNDO = pass)");
 
         int step = curStep_.load();
         int bar = step >= 0 ? step / hh::STEPS : 0;
-        screen_.setText(P_BARTXT, step >= 0 ? "Bar " + std::to_string(bar + 1) + " / 4" : std::string("Stop"));
+        int bars = std::max(1, (loopLenShown_.load() + hh::STEPS - 1) / hh::STEPS);
+        screen_.setText(P_BARTXT, step >= 0 ? "Bar " + std::to_string(bar + 1) + " / " + std::to_string(std::min(bars, 4)) : std::string("Stop"));
         for (int j = 0; j < kPads; ++j)
         {
             int st = bar * hh::STEPS + j;
@@ -1211,6 +1278,28 @@ private:
             for (int v = 0; v < hh::DRUMS; ++v) if (rend_.drum[v][st].vel > 0.f) has[0] = true;
             for (int k = 0; k < kLanes; ++k) screen_.setFrame(P_CELL0 + k * kPads + j, (has[k] ? 1 : 0) + (now ? 2 : 0));
         }
+    }
+
+    // what a lane plays: drums their hits (and SCHLAG if linked), the others their notes and the bars' chords
+    std::string laneSummary(int k, bool linked) const
+    {
+        int n = 0;
+        for (int s = 0; s < kSteps; ++s)
+        {
+            if (k == 0) { for (int v = 0; v < hh::DRUMS; ++v) if (rend_.drum[v][s].vel > 0.f) ++n; }
+            else if (k == 1) n += rend_.bass[s].pitch >= 0;
+            else if (k == 2) n += rend_.mel[s].pitch >= 0;
+            else n += rend_.pad[s].pitch[0] >= 0;
+        }
+        if (k == 0) return std::to_string(n) + " hits" + (linked ? " · SCHLAG" : "");
+        std::string t = std::to_string(n) + (k == 3 ? " chords ·" : " notes ·");
+        for (int b = 0; b < hh::BARS; ++b)
+        {
+            char c[16];
+            hh::chordName(pat_.bar[b], c, sizeof c);
+            t += std::string(" ") + c;
+        }
+        return t;
     }
 
     long long nowMs() const
@@ -1237,7 +1326,7 @@ private:
             }
             if (on) ++alive;
             screen_.setFrame(P_LAMP0 + k, on ? 1 : 0);
-            screen_.setText(P_LANETXT0 + k, name);
+            screen_.setText(P_LANETXT0 + k, laneSummary(k, on));
         }
         linked_ = alive;
         // LINK and MIDI OUT share the row: "2 linked · OUT 130:0 · 512"
@@ -1353,6 +1442,39 @@ private:
         screen_.setText(P_STYLEHDR, b);
     }
 
+    void setParam(int i, float x) { set(i, x); notifyHostParameterChanged(i); }
+
+    // REC (worker): the pad hits go into the chop lane, on the nearest 16th, overdubbing pass by pass
+    void takeRecorded()
+    {
+        int r = recR_.load(std::memory_order_relaxed), w = recW_.load(std::memory_order_acquire);
+        if (r != w)
+        {
+            const long len = std::max(4, loopLenShown_.load());
+            const float bpm = bpmNow();
+            for (; r != w; ++r)
+            {
+                const RecHit& h = recQ_[r % kRecQ];
+                long q = (long)std::llround(h.q) - loopStartShown_.load();
+                long pass = (long)std::floor((double)q / len);
+                long pos = ((q % len) + len) % len;
+                int st = (int)(pos % kSteps);
+                if (pass != recPass_) { undoPat_ = pat_; hasUndo_ = true; recPass_ = pass; } // UNDO: this pass
+                hh::ChopEv e;
+                e.pad = (int8_t)h.chop;
+                e.vel = std::max(0.2f, h.vel);
+                float secs = h.chop < info_.count ? info_.chop[h.chop].seconds : 0.25f;
+                e.len = clamp(secs * bpm / 60.f * 4.f, 0.5f, 16.f);
+                pat_.chop[st] = e;
+                recDirty_ = true;
+            }
+            recR_.store(r, std::memory_order_release);
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (recDirty_ && now - recPublish_ > std::chrono::milliseconds(150)) { recDirty_ = false; recPublish_ = now; publishLoop(); }
+        if (recState_.load() == 0) recPass_ = -1;
+    }
+
     // ------------------------------------------------------------------ worker: buttons
     void handleTaps()
     {
@@ -1378,6 +1500,37 @@ private:
                 set(P_STYLE, (float)s);
                 notifyHostParameterChanged(P_STYLE);
             }
+            else if (p == P_LOADSMP)
+            {
+                if (previewPath_.empty()) screen_.message(P_LISTINFO, "tap a WAV first");
+                else
+                {
+                    std::string path = previewPath_;
+                    stopPreview();
+                    if (loadPath(path)) { cutAndPublish(true); screen_.message(P_LISTINFO, "loaded: " + stripWav(baseName(path))); }
+                }
+            }
+            else if (p == P_CLEAR)
+            {
+                if (hostPlaying_.load()) screen_.message(P_STATUS, "CLEAR: stop the MPC first");
+                else
+                {
+                    undoPat_ = pat_;
+                    hasUndo_ = true;
+                    pat_.clear();
+                    publishLoop();
+                    screen_.message(P_STATUS, "CLEAR: empty. REC + Play, or NEW ALL", 4000);
+                }
+            }
+            else if (p >= P_MODEPREV0 && p < P_MODENEXT0 + kLanes)
+            {
+                static const int n[kLanes] = {3, 4, 4, 3};
+                int k = (p - P_MODEPREV0) % kLanes, d = p >= P_MODENEXT0 ? 1 : n[k] - 1;
+                setParam(P_LANEMODE0 + k, (float)((getInt(P_LANEMODE0 + k) + d) % n[k]));
+                screen_.message(P_STATUS, "MODE: with the next NEW", 2500);
+            }
+            else if (p == P_REC)
+                screen_.message(P_STATUS, getBool(P_REC) ? "REC on: press Play, 1 bar count-in" : "REC off", 3000);
             else if (p == P_REVBTN && sel_ < info_.count) { cRev_[sel_].store(!cRev_[sel_].load()); }
             else if (p == P_LOCKBTN && sel_ < info_.count) { padSet_[sel_].lock = !padSet_[sel_].lock; }
             else if (p == P_PRINT) print();
@@ -1431,6 +1584,7 @@ private:
                 else if (wasRestored) cutAndPublish(false);
             }
             handleTaps();
+            takeRecorded();
             if (bankReset_.exchange(false)) { notifyHostParameterChanged(P_BANK); requestDisplayUpdate(); }
             if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "learned and saved", 3000);
 
@@ -1476,7 +1630,21 @@ private:
     // audio thread
     hh::ChopSet* cur_ = nullptr;
     Seq* seq_ = nullptr;
-    std::atomic<bool> stateLoaded_{false}, hostCycling_{false};
+    std::atomic<bool> stateLoaded_{false}, hostCycling_{false}, hostPlaying_{false};
+    long loopLen_ = 64, loopStart_ = 0;           // audio thread
+    std::atomic<int> loopLenShown_{64}, recState_{0};
+    std::atomic<long> loopStartShown_{0};
+    // REC: pad hits from the audio thread to the worker
+    struct RecHit { int chop; float vel; double q; };
+    static const int kRecQ = 256;
+    RecHit recQ_[kRecQ];
+    std::atomic<int> recW_{0}, recR_{0};
+    double recFrom_ = 0.0;                        // audio thread: REC writes from this step on (after the count-in)
+    std::atomic<double> recFromShared_{0.0};
+    bool recWas_ = false;
+    long recPass_ = -1;                           // worker: the pass being recorded (UNDO takes it back)
+    std::chrono::steady_clock::time_point recPublish_{};
+    bool recDirty_ = false;
     std::atomic<double> hostCycle_[2], hostBar_{0.0};
     std::atomic<int> hostSig_{404};
     hh::SampleData* preview_ = nullptr;

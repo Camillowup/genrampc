@@ -433,7 +433,9 @@ def print_page(p, title_x, has_dir_buttons):
 # ------------------------------------------------------------------ GENRA CHOP
 CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "UNDO", "SAVE WAV", "CHOPS MINUS",
               "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK", "DRIVES", "PAGE BACK",
-              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD"]
+              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR",
+              "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4",
+              "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"]
 
 
 class ChopPage(Page):
@@ -467,17 +469,21 @@ def chop_page(p):
     for i in range(16):
         p.film(steps, 2, "SCHRITT %d" % (i + 1), "%d 266 72 12" % slot_x(i))
     p.dark("20 288 560 332")
-    lamps, cells = img.lamps(), img.cells()
+    # per lane: what it plays, MODE < >, DENSITY (Q-Links 9-12), NEW; MODE and DENSITY act with the next NEW
+    dens = img.knob(52)
+    modes = ("DRUM MODE", "BASS MODE", "MELODY MODE", "PADS MODE")
     for k, cap in enumerate(("drums", "bass", "mel", "pads")):
-        y = 292 + k * 78
-        p.film(lamps, 2, "LAMPE %d" % (k + 1), "32 %d 16 16" % (y + 6))
-        p.caption(cap, "56 %d 160 28" % y, 19.0, L_CREAM)
-        p.value("SPURTEXT %d" % (k + 1), "220 %d 250 28" % y, 17.0, L_CREAM_MUTED, RIGHT)
-        p.box(LANE, "30 %d 444 40" % (y + 30), 4)
-        for j in range(16):
-            p.film(cells, 4, "ZELLE %d %d" % (k + 1, j + 1), "%d %d 26 36" % (32 + int(round(j * 27.5)), y + 32))
-        p.key("NEW %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], RED, "new", "484 %d 86 54" % (y + 13), 21.0)
-    p.value("TAKT", "32 596 300 22", 17.0, L_CREAM_MUTED)
+        y = 294 + k * 76
+        p.caption(cap, "32 %d 160 30" % (y + 2), 20.0, L_CREAM)
+        p.value("SPURTEXT %d" % (k + 1), "32 %d 160 26" % (y + 34), 13.0, L_CREAM_MUTED)
+        p.key("MODE BACK %d" % (k + 1), GREY, "prev", "196 %d 34 56" % (y + 3), 22.0, L_KEYINK)
+        p.lcd("234 %d 108 56" % (y + 3))
+        p.value(modes[k], "234 %d 108 56" % (y + 3), 17.0, L_LCD, CENTRED)
+        p.key("MODE NEXT %d" % (k + 1), GREY, "next", "346 %d 34 56" % (y + 3), 22.0, L_KEYINK)
+        p.knob_only("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "390 %d 52 52" % (y + 5), dens)
+        p.value("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "444 %d 52 56" % (y + 3), 14.0, L_CREAM, CENTRED)
+        p.key("NEW %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], RED, "new", "500 %d 72 56" % (y + 3), 19.0)
+    p.value("TAKT", "32 594 300 22", 16.0, L_CREAM_MUTED)
     p.caption("style", "600 286 120 24", 16.0, L_MUTED)
     p.lcd("600 312 260 52")
     p.value("STYLE", "612 312 244 52", 21.0, L_LCD)
@@ -500,8 +506,10 @@ def chop_page(p):
     p.state_key("LOCK", "LOCKLICHT", "lock", "1110 450 150 46", 18.0)
     for i, param in enumerate(("PITCH", "DECAY", "FILTER", "LEVEL")):
         p.knob(param, 600 + i * 165, 508)
-    p.lcd("600 586 520 32")
-    p.value("STATUS", "612 586 500 32", 17.0, L_LCD)
+    p.lcd("600 586 280 32")
+    p.value("STATUS", "608 586 268 32", 14.0, L_LCD)
+    p.toggle("REC", "rec", "888 586 102 32", 16.0)
+    p.key("CLEAR", GREY, "clear", "998 586 122 32", 16.0, L_KEYINK)
     p.key("SAVE WAV", GREY, "savewav", "1128 586 132 32", 16.0, L_KEYINK)
 
 
@@ -518,6 +526,7 @@ def chop_browser(p):
     p.key("BACK", RED, "back", "920 66 340 90", 32.0)
     p.key("DRIVES", KEY_OFF, "drives", "920 164 340 90", 32.0)
     p.key("SAVE HERE", KEY_OFF, "savehere", "920 262 340 70", 24.0)
+    p.key("LOAD SAMPLE", RED, "loadsmp", "920 340 340 86", 30.0)
     p.value("LISTINFO", "920 434 340 36", 22.0, L_MUTED, CENTRED)
     p.control("LIST", "951 472 278 107")
     p.caption("loaded", "20 584 150 40", 24.0, L_MUTED)
@@ -553,7 +562,7 @@ def chop_style(p):
     p.key("STYLE BACK", GREY, "stprev", "20 556 300 62", 24.0, L_KEYINK)
     p.key("STYLE NEXT", GREY, "stnext", "330 556 300 62", 24.0, L_KEYINK)
     p.caption("length", "650 556 110 62", 18.0, L_MUTED)
-    p.radio("LENGTH", ("len1", "len2", "len4", "len8"), (760, 885, 1010, 1135), 556, 120, 62, 18.0)
+    p.radio("LENGTH", ("lenauto", "len1", "len2", "len4", "len8"), (760, 860, 960, 1060, 1160), 556, 96, 62, 17.0)
 
 
 def chop_print(p):
@@ -577,7 +586,7 @@ def chop_setup(p):
 
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
-                "ROOT HERE", "SAVE SAMPLE", "SAVE KIT"]
+                "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE"]
 DEAD_VOICES = {2: 3, 6: 4}  # CLAP and TOM: dying displays (value: the damage pattern)
 
 
@@ -598,7 +607,7 @@ def schlag_main(p):
     p.key("UNDO", GREY, "undo", "746 9 120 46", 20.0, L_KEYINK)
     p.key("BASIC", GREY, "basic", "872 9 120 46", 20.0, L_KEYINK)
     p.key("NEW", RED, "new", "998 9 262 46", 24.0)
-    lamps, ring, small = img.lamps(), img.ring(72), img.knob(40)
+    lamps, ring, small = img.lamps(), img.ring(72), img.knob(52)
     pad = img.two(PAD, RED_LIT, 145, 62, 7)
     for v in range(8):
         x, w = 20 + v * 155, 145
@@ -621,14 +630,15 @@ def schlag_main(p):
         p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 244 72 72" % (x + 36), ring)
         p.lcd("%d 322 89 26" % (x + 28), dead)
         p.value("RANDOM %s" % VOICE_NAMES[v], "%d 322 89 26" % (x + 28), 16.0, ink, CENTRED)
-        for k in range(4):
-            cx, cy = x + 38 + (k % 2) * 69, (412 if k < 2 else 500)
-            fb = "%d %d 64 20" % (cx - 32, cy - 48)
+        # two function slots: the name field (tap = next function), a bigger knob, its value beside it
+        for k in range(2):
+            y = 358 + k * 96
+            fb = "%d %d 129 38" % (x + 8, y)
             p.lcd(fb, dead)
-            p.value("FUNCTION %d %d" % (v + 1, k + 1), fb, 11.0, ink, CENTRED)
+            p.value("FUNCTION %d %d" % (v + 1, k + 1), fb, 17.0, ink, CENTRED)
             p.button("FUNKTIONSWAHL %d %d" % (v + 1, k + 1), fb)
-            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 40 40" % (cx - 20, cy - 22), small)
-            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 68 20" % (cx - 34, cy + 20), 13.0, L_CREAM_MUTED, CENTRED)
+            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 52 52" % (x + 12, y + 42), small)
+            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 76 52" % (x + 66, y + 42), 16.0, L_CREAM, CENTRED)
         p.film(pad, 2, "PADLICHT %d" % (v + 1), "%d 558 145 62" % x)
         p.caption("p%d" % (v + 1), "%d 560 40 24" % (x + 8), 15.0, L_PAD)
         p.button("PAD %d" % (v + 1), "%d 558 145 62" % x)
@@ -655,6 +665,7 @@ def schlag_folder(p):
     p.key("FOLDER UP", RED, "back", "640 230 200 70", 24.0)
     p.key("DRIVES", KEY_OFF, "drives", "850 230 200 70", 22.0)
     p.key("ROOT HERE", KEY_OFF, "root", "1060 230 200 70", 20.0)
+    p.key("LOAD SAMPLE", RED, "loadsmp", "640 310 620 80", 28.0)
     p.value("LISTINFO", "640 410 620 50", 18.0, L_MUTED, CENTRED)
     p.key("SAVE SAMPLE", KEY_OFF, "savesmp", "640 476 160 104", 17.0)
     p.control("LIST", "811 474 278 107")
@@ -733,10 +744,14 @@ def main():
                  ("STYLE", chop_style, []), ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
         choices = {"BANK": ["A", "B", "C", "D"], "VIEW": ["Sample", "Loop", "Chop"],
                    "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"],
-                   "LENGTH": ["1 bar", "2 bars", "4 bars", "8 bars"]}
+                   "LENGTH": ["Auto", "1 bar", "2 bars", "4 bars", "8 bars"],
+                   "REC": ["Off", "On"], "DRUM MODE": ["KIT", "BREAK", "BOTH"],
+                   "BASS MODE": ["FOLLOW", "ROOT+5", "WALK", "808"], "MELODY MODE": ["STAB", "LEAD", "ARP", "RIFF"],
+                   "PADS MODE": ["SUSTAIN", "STAB", "SWELL"]}
         screen = tabmap(5, {0: {13: idx["LIST"]},
                             1: {1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
-                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"]},
+                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"],
+                                9: idx["DENS DRUMS"], 10: idx["DENS BASS"], 11: idx["DENS MELODY"], 12: idx["DENS PADS"]},
                             2: {1: idx["STYLE"], 2: idx["LENGTH"], 3: idx["VOLUME"]}})
         program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
     elif plugin == "SCHLAG":

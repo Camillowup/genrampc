@@ -41,15 +41,15 @@ using namespace genrafiles;
 
 namespace {
 
-static const int kVoices = 8, kSlots = 4, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
-static const int kMaxFiles = 24, kFlashes = 12;
+static const int kVoices = 8, kSlots = 2, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
+static const int kMaxFiles = 24, kFlashes = 13;
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
 static const float kMaxSeconds = 2.f;
 const char* const kVoiceNames[kVoices] = {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"};
 enum Func { F_TUNE, F_DECAY, F_DRIVE, F_BITS, F_REPEAT, F_PAN, F_REVERSE, F_FILTER, NUM_FUNCS };
 const char* const kFuncNames[NUM_FUNCS] = {"TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"};
-const int kDefaultFunc[kSlots] = {F_TUNE, F_DECAY, F_DRIVE, F_PAN};
+const int kDefaultFunc[kSlots] = {F_TUNE, F_DECAY};
 
 static const char* const kCaptions[][2] = {
     {"schlag", "SCHLAG"}, {"auto", "AUTO"}, {"padsmode", "PADS"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
@@ -64,7 +64,7 @@ static const char* const kCaptions[][2] = {
     {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
     {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
     {"savekit", "SAVE KIT"}, {"kitnotes", "MPC KIT NOTES"}, {"kithelp1", "MIDI ch 10: MPC kit notes"},
-    {"kithelp2", "(A01-A08 = KICK .. PERC)"}, {"kithelp3", "ON: on every channel"}};
+    {"kithelp2", "(A01-A08 = KICK .. PERC)"}, {"kithelp3", "ON: on every channel"}, {"loadsmp", "LOAD SAMPLE"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -74,13 +74,14 @@ enum
     P_LEVEL0 = P_RANDOM0 + kVoices,
     P_MUTE0 = P_LEVEL0 + kVoices,
     P_SOLO0 = P_MUTE0 + kVoices,
-    P_FUNC0 = P_SOLO0 + kVoices,          // v * 4 + k
-    P_VAL0 = P_FUNC0 + kVoices * kSlots,  // v * 4 + k
-    P_VOLUME = P_VAL0 + kVoices * kSlots, P_AUTO, P_CHOKE, P_VOICE, P_KITNOTES,
+    P_FUNC0 = P_SOLO0 + kVoices,          // v * kSlots + k: the function a slot shows
+    P_VAL0 = P_FUNC0 + kVoices * kSlots,  // v * kSlots + k: the slot's knob (the value of the function it shows)
+    P_FV0 = P_VAL0 + kVoices * kSlots,    // v * NUM_FUNCS + f: every function's value (works shown or not)
+    P_VOLUME = P_FV0 + kVoices * NUM_FUNCS, P_AUTO, P_CHOKE, P_VOICE, P_KITNOTES,
     // buttons
-    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, // flashes 0..11
+    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, // flashes 0..12
     P_SCROLL,
-    P_FUNCTAP0,                            // v * 4 + k: the function's name, tap = next function
+    P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
     P_PADTAP0 = P_PICK0 + kVoices,
     P_ROWTAP0 = P_PADTAP0 + kVoices,
@@ -177,12 +178,19 @@ public:
         for (int v = 0; v < kVoices; ++v)
             for (int k = 0; k < kSlots; ++k)
                 addParam(floatParam(("val" + std::to_string(v + 1) + "_" + std::to_string(k + 1)).c_str(), ("VALUE " + std::to_string(v + 1) + " " + std::to_string(k + 1)).c_str(), 0.f, 100.f, defaultValue(kDefaultFunc[k]), "", 0));
+        for (int v = 0; v < kVoices; ++v)
+            for (int f = 0; f < NUM_FUNCS; ++f)
+            {
+                Param q = floatParam(("fv" + std::to_string(v + 1) + "_" + kFuncNames[f]).c_str(), (std::string(kVoiceNames[v]) + " " + kFuncNames[f]).c_str(), 0.f, 100.f, defaultValue(f), "", 0);
+                q.automatable = false;
+                addParam(q);
+            }
         addParam(floatParam("volume", "VOLUME", -40.f, 6.f, 0.f, "dB", 1));
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
         addParam(boolParam("choke", "HAT CHOKE", true));
         addParam(choiceParam("voice", "VOICE", {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"}, 0));
         addParam(boolParam("kitnotes", "MPC KIT NOTES", false));
-        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT"})
+        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -215,7 +223,7 @@ public:
         for (int i = P_FUNCTAP0; i < P_ROWTAP0 + kRows; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "SCHLAG 0.4 · LINK v3");
+        screen_.setText(P_VERSION, "SCHLAG 0.5 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -227,6 +235,7 @@ public:
         }
         preview_.store(nullptr);
         for (auto& r : previewRetired_) r.store(nullptr);
+        for (int& f : shownFunc_) f = -1;
     }
 
     ~Schlag() override
@@ -250,7 +259,7 @@ public:
         i.name = "SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 400;
+        i.version = 500;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -306,7 +315,8 @@ public:
         if (cur_ >= 0) inUse_.store(cur_, std::memory_order_release);
         const genralink::Loop* loop = cur_ >= 0 ? &loops_[cur_] : nullptr;
         long len = L ? (long)L->loopSteps.load(std::memory_order_relaxed) : 0;
-        if (len != 16 && len != 32 && len != 64 && len != 128) len = kSteps;
+        const long start = L && len >= 4 && len <= 1024 ? (long)L->loopStart.load(std::memory_order_relaxed) : 0;
+        if (len < 4 || len > 1024) len = kSteps;
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -326,7 +336,7 @@ public:
             const float swing = loop->swingX1000 / 1000.f;
             while (nextStep_ < q1)
             {
-                long n = (long)std::llround(nextStep_);
+                long n = (long)std::llround(nextStep_) - start;
                 long pos = ((n % len) + len) % len;
                 int s = (int)(pos % kSteps);
                 if (pos == 0)
@@ -334,7 +344,7 @@ public:
                     int r = ready_.load(std::memory_order_acquire);
                     if (r >= 0 && r != cur_) { cur_ = r; inUse_.store(cur_, std::memory_order_release); loop = &loops_[cur_]; }
                 }
-                uint32_t round = (uint32_t)(n / kSteps);
+                uint32_t round = (uint32_t)((n - pos) / len); // the pass of the loop
                 double base = (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0);
                 for (int v = 0; v < kVoices; ++v)
                 {
@@ -468,7 +478,15 @@ public:
         char b[32];
         if (index >= P_RANDOM0 && index < P_RANDOM0 + kVoices) { std::snprintf(b, sizeof b, "%.0f %%", plain); out = b; return true; }
         if (index >= P_LEVEL0 && index < P_LEVEL0 + kVoices) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
-        if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots) { out = std::string(kFuncNames[clamp((int)std::lround(plain), 0, NUM_FUNCS - 1)]) + " >"; return true; }
+        if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots)
+        {
+            // "• TUNE >": the dot = this voice has a function off its neutral value (shown or not)
+            int v = (index - P_FUNC0) / kSlots, f = clamp((int)std::lround(plain), 0, NUM_FUNCS - 1);
+            bool any = false;
+            for (int g = 0; g < NUM_FUNCS; ++g) any = any || std::fabs(get(P_FV0 + v * NUM_FUNCS + g) - defaultValue(g)) > 0.5f;
+            out = std::string(any ? "• " : "") + kFuncNames[f] + " >";
+            return true;
+        }
         if (index >= P_VAL0 && index < P_VAL0 + kVoices * kSlots)
         {
             int f = clamp(getInt(P_FUNC0 + (index - P_VAL0)), 0, NUM_FUNCS - 1);
@@ -535,12 +553,8 @@ private:
     }
 
     // ------------------------------------------------------------------ audio
-    float funcValue(int v, int f, float def) const
-    {
-        float out = def;
-        for (int k = 0; k < kSlots; ++k) if (getInt(P_FUNC0 + v * kSlots + k) == f) out = get(P_VAL0 + v * kSlots + k);
-        return out;
-    }
+    // every function keeps its value, shown in a slot or not
+    float funcValue(int v, int f, float) const { return get(P_FV0 + v * NUM_FUNCS + f); }
     // REPEAT: hits per step (aus, 1/32 = 2, 1/48 = 3, 1/64 = 4)
     int repeatOf(int v) const { return repeatIndex(funcValue(v, F_REPEAT, 0.f)) + 1; }
 
@@ -674,13 +688,8 @@ private:
         if (path.empty()) { previewPath_.clear(); return; }
         if (hasExt(path, ".kit")) { previewPath_.clear(); loadKit(path); return; }
         int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
-        if (path == previewPath_)
-        {
-            previewPath_.clear();
-            size_t i = path.find_last_of('/');
-            if (loadVoice(v, path.substr(0, i), path.substr(i + 1))) screen_.message(P_LISTINFO, std::string(kVoiceNames[v]) + ": " + stripWav(baseName(path)));
-            else screen_.message(P_LISTINFO, "cannot read");
-        }
+        (void)v;
+        if (path == previewPath_) loadMarked();
         else
         {
             Wave w;
@@ -689,7 +698,41 @@ private:
             for (auto& r : previewRetired_) delete r.exchange(nullptr);
             delete previewPending_.exchange(s, std::memory_order_acq_rel);
             previewPath_ = path;
-            screen_.message(P_LISTINFO, "tap again = the voice's sample");
+            screen_.message(P_LISTINFO, "LOAD SAMPLE (or tap again)");
+        }
+    }
+
+    // LOAD SAMPLE (or a 2nd tap): the marked WAV becomes the chosen voice's sample, its folder the voice's folder
+    void loadMarked()
+    {
+        if (previewPath_.empty()) { screen_.message(P_LISTINFO, "tap a WAV first"); return; }
+        std::string path = previewPath_;
+        previewPath_.clear();
+        int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
+        size_t i = path.find_last_of('/');
+        if (loadVoice(v, path.substr(0, i), path.substr(i + 1))) screen_.message(P_LISTINFO, std::string(kVoiceNames[v]) + ": " + stripWav(baseName(path)));
+        else screen_.message(P_LISTINFO, "cannot read");
+    }
+
+    // the two slots per voice are windows on all its functions: a slot that changes its function shows that
+    // function's value; a knob that turns writes the value of the function it shows
+    void syncSlots(bool force)
+    {
+        for (int i = 0; i < kVoices * kSlots; ++i)
+        {
+            int v = i / kSlots, f = clamp(getInt(P_FUNC0 + i), 0, NUM_FUNCS - 1);
+            float val = get(P_VAL0 + i);
+            if (force || f != shownFunc_[i])
+            {
+                shownFunc_[i] = f;
+                shownVal_[i] = get(P_FV0 + v * NUM_FUNCS + f);
+                if (std::fabs(val - shownVal_[i]) > 1e-4f) setParam(P_VAL0 + i, shownVal_[i]);
+            }
+            else if (std::fabs(val - shownVal_[i]) > 1e-4f)
+            {
+                shownVal_[i] = val;
+                set(P_FV0 + v * NUM_FUNCS + f, val);
+            }
         }
     }
 
@@ -788,7 +831,7 @@ private:
     {
         std::string dir = saveDir(clamp(getInt(P_VOICE), 0, kVoices - 1));
         if (dir.empty()) { screen_.message(P_LISTINFO, "open a folder first"); return; }
-        std::string t = "SGK1\n";
+        std::string t = "SGK2\n"; // per voice: folder, file, RANDOM, LEVEL, the 2 slots' functions, every function's value
         {
             std::lock_guard<std::mutex> g(mtx_);
             for (int v = 0; v < kVoices; ++v)
@@ -799,7 +842,12 @@ private:
                 t += b;
                 for (int k = 0; k < kSlots; ++k)
                 {
-                    std::snprintf(b, sizeof b, "\t%d\t%.2f", getInt(P_FUNC0 + v * kSlots + k), get(P_VAL0 + v * kSlots + k));
+                    std::snprintf(b, sizeof b, "\t%d", getInt(P_FUNC0 + v * kSlots + k));
+                    t += b;
+                }
+                for (int f = 0; f < NUM_FUNCS; ++f)
+                {
+                    std::snprintf(b, sizeof b, "\t%.2f", get(P_FV0 + v * NUM_FUNCS + f));
                     t += b;
                 }
                 t += "\n";
@@ -826,7 +874,8 @@ private:
             while ((n = std::fread(buf, 1, sizeof buf, fp)) > 0) t.append(buf, n);
             std::fclose(fp);
         }
-        if (t.compare(0, 5, "SGK1\n") != 0) { screen_.message(P_LISTINFO, "not a SCHLAG kit"); return; }
+        const bool v1 = t.compare(0, 5, "SGK1\n") == 0; // SCHLAG 0.3: 4 slots of function + value
+        if (!v1 && t.compare(0, 5, "SGK2\n") != 0) { screen_.message(P_LISTINFO, "not a SCHLAG kit"); return; }
         size_t pos = 5;
         int missing = 0;
         for (int v = 0; v < kVoices && pos < t.size(); ++v)
@@ -837,7 +886,7 @@ private:
             std::vector<std::string> c;
             size_t a = 0;
             for (;;) { size_t b = line.find('\t', a); c.push_back(line.substr(a, b == std::string::npos ? std::string::npos : b - a)); if (b == std::string::npos) break; a = b + 1; }
-            if (c.size() < 4 + 2 * kSlots) continue;
+            if (c.size() < (v1 ? 12u : (size_t)(4 + kSlots + NUM_FUNCS))) continue;
             if (!c[0].empty() && !isDir(c[0])) ++missing;
             {
                 std::lock_guard<std::mutex> g(mtx_);
@@ -847,12 +896,25 @@ private:
             }
             setParam(P_RANDOM0 + v, (float)std::atof(c[2].c_str()));
             setParam(P_LEVEL0 + v, (float)std::atof(c[3].c_str()));
-            for (int k = 0; k < kSlots; ++k)
+            float fv[NUM_FUNCS];
+            int slot[kSlots];
+            for (int f = 0; f < NUM_FUNCS; ++f) fv[f] = defaultValue(f);
+            if (v1)
+                for (int k = 0; k < 4; ++k)
+                {
+                    int f = clamp(std::atoi(c[4 + 2 * k].c_str()), 0, NUM_FUNCS - 1);
+                    fv[f] = (float)std::atof(c[5 + 2 * k].c_str());
+                    if (k < kSlots) slot[k] = f;
+                }
+            else
             {
-                setParam(P_FUNC0 + v * kSlots + k, (float)clamp(std::atoi(c[4 + 2 * k].c_str()), 0, NUM_FUNCS - 1));
-                setParam(P_VAL0 + v * kSlots + k, (float)std::atof(c[5 + 2 * k].c_str()));
+                for (int k = 0; k < kSlots; ++k) slot[k] = clamp(std::atoi(c[4 + k].c_str()), 0, NUM_FUNCS - 1);
+                for (int f = 0; f < NUM_FUNCS; ++f) fv[f] = (float)std::atof(c[4 + kSlots + f].c_str());
             }
+            for (int f = 0; f < NUM_FUNCS; ++f) setParam(P_FV0 + v * NUM_FUNCS + f, fv[f]);
+            for (int k = 0; k < kSlots; ++k) setParam(P_FUNC0 + v * kSlots + k, (float)slot[k]);
         }
+        syncSlots(true);
         std::string name = baseName(path);
         name = name.substr(0, name.size() - 4);
         screen_.message(P_LISTINFO, missing ? name + ": " + std::to_string(missing) + " folders missing" : name + " loaded", 4000);
@@ -992,6 +1054,7 @@ private:
         genralink::Loop tmp;
         genralink::Link::clearLoop(loop_);
         genralink::Link::Alive alive;
+        int lastVoice = -1;
         float lastRandom[kVoices];
         for (int v = 0; v < kVoices; ++v) lastRandom[v] = get(P_RANDOM0 + v);
         long long lastSlow = 0;
@@ -1038,11 +1101,15 @@ private:
                 else if (p == P_BASIC)
                 {
                     for (int v = 0; v < kVoices; ++v) { set(P_RANDOM0 + v, 0.f); notifyHostParameterChanged(P_RANDOM0 + v); lastRandom[v] = 0.f; swapped_[v].store(0); }
-                    screen_.message(P_STATUS, "BASIC: every voice on its sample");
+                    for (int v = 0; v < kVoices; ++v)
+                        for (int f = 0; f < NUM_FUNCS; ++f) setParam(P_FV0 + v * NUM_FUNCS + f, defaultValue(f));
+                    syncSlots(true);
+                    screen_.message(P_STATUS, "BASIC: samples and functions neutral");
                 }
                 else if (p == P_PRINT) print(L);
                 else if (p == P_SAVESMP) saveSample();
                 else if (p == P_SAVEKIT) saveKit();
+                else if (p == P_LOADSMP) loadMarked();
                 else if (p == P_LEARN) pads_.startLearning();
                 else if (p == P_BACK) { browser_.up(); previewPath_.clear(); }
                 else if (p == P_DRVBTN) { browser_.drives(); previewPath_.clear(); }
@@ -1058,10 +1125,8 @@ private:
                 {
                     int idx = p - P_FUNCTAP0;
                     int f = (getInt(P_FUNC0 + idx) + 1) % NUM_FUNCS;
-                    set(P_FUNC0 + idx, (float)f);
-                    set(P_VAL0 + idx, defaultValue(f));
-                    notifyHostParameterChanged(P_FUNC0 + idx);
-                    notifyHostParameterChanged(P_VAL0 + idx);
+                    setParam(P_FUNC0 + idx, (float)f);
+                    syncSlots(false); // the knob now shows the new function's own value
                 }
                 else if (p >= P_PICK0 && p < P_PICK0 + kVoices)
                 {
@@ -1085,6 +1150,19 @@ private:
                 printList();
                 if (L) genralink::Link::writeName(L->lane[genralink::LANE_DRUMS], "SCHLAG");
                 if (browser_.cwd().empty()) browser_.list();
+            }
+            syncSlots(false);
+            // a voice chosen (page SCHLAG or FOLDER): the list opens its folder
+            int vNow = clamp(getInt(P_VOICE), 0, kVoices - 1);
+            if (vNow != lastVoice)
+            {
+                lastVoice = vNow;
+                std::string f;
+                {
+                    std::lock_guard<std::mutex> g(mtx_);
+                    f = voiceFolder_[vNow];
+                }
+                if (!f.empty() && isDir(f)) { browser_.open(f); previewPath_.clear(); }
             }
             texts(L, on);
             cells();
@@ -1123,6 +1201,8 @@ private:
     std::atomic<uint32_t> litMask_{0};
     std::atomic<int> ready_{-1}, inUse_{-1}, curStep_{-1};
     genralink::Loop loops_[3];
+    int shownFunc_[kVoices * kSlots];
+    float shownVal_[kVoices * kSlots] = {};
     int cur_ = -1; // audio thread: the loop that plays (index into loops_)
     // worker
     genralink::Loop loop_;

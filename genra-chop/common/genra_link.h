@@ -111,8 +111,9 @@ struct LinkData
     // written by the companions
     Companion             lane[NUM_LANES];
     // written by GENRA CHOP (added at the end, so the layout above stays): the loop's length in steps
-    // (LENGTH: 16, 32, 64 or 128); a new loop starts when the position modulo this length is 0
+    // (LENGTH: AUTO = the MPC sequence's loop, or 16, 32, 64, 128); a new loop starts at the start of it
     std::atomic<int32_t>  loopSteps;
+    std::atomic<int32_t>  loopStart; // where that loop starts, in steps on the MPC's time line (LENGTH AUTO)
 };
 
 class Link
