@@ -330,7 +330,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 600;
+        i.version = 700;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;

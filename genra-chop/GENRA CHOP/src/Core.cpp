@@ -874,8 +874,9 @@ void generate(Pattern& p, int track, const Settings& set, const SampleInfo& si, 
 		genChop(p, st, set, si, pads, rng, bpm);
 	if ((all || harmony || track == T_CHOP) && !lockChords)
 		genChords(p, st, set, si, pads, rng);
-	// the bass leans on the kicks and the chops' chords; the pads on the chords
-	if ((all || harmony || track == T_BASS || track == T_CHOP || track == T_DRUMS) && may(T_BASS))
+	// the bass leans on the kicks and the chops' chords (it looks at them when it is rolled); the pads on the chords.
+	// A lane's own NEW changes only that lane: NEW DRUMS keeps the bass (MPC: NEW BASS or NEW ALL roll it again)
+	if ((all || harmony || track == T_BASS || track == T_CHOP) && may(T_BASS))
 		genBass(p, st, set, si, pads, rng);
 	if ((all || harmony || track == T_MEL) && may(T_MEL))
 		genMel(p, st, set, si, pads, rng);

@@ -1,0 +1,17 @@
+{
+  "name": "GENRA SCHLAG",
+  "manufacturer": "Genra",
+  "version": "0.7.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "GnSg",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Drums",
+  "file32": "VST/schlag-arm32.so",
+  "file64": "VST/schlag-arm64.so",
+  "description": "The drum companion of GENRA CHOP: eight sampled voices that follow GENRA CHOP's drums, a random sample per hit from each voice's folder (like the Polyend Play), seven RANDOM kinds per voice, two function slots per voice, a STEPS page with values per step, SAVE SAMPLE, kits, MIDI channel 10 from GENRA CHOP OUT, PRINT as MIDI.",
+  "author": "Genra",
+  "url": "https://github.com/Camillowup/genrampc",
+  "license": "GPL-3.0-only"
+}

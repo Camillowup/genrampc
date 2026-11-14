@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""build_skin.py - writes the Plugin Skins of GENRA CHOP and SCHLAG and draws
+"""build_skin.py - writes the Plugin Skins of GENRA CHOP and GENRA SCHLAG and draws
 every image.
 
 Look: the retro MPC (keys, dark fields, LCDs like the MPC 2000); every plugin has the colours of a limited-edition MPC
@@ -9,7 +9,7 @@ skin are not drawn on the MPC: every caption is a read-only parameter the plugin
 (display columns, slots, steps, cells, lamps, flashes) get their frame from the plugin as the parameter's value.
 
 Usage (after sdk/tools/build.py has built the plugin):
-    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"     (or "SCHLAG")
+    python genra-chop/tools/build_skin.py "genra-chop/GENRA CHOP"     (or "GENRA SCHLAG")
 """
 
 import json
@@ -63,7 +63,7 @@ THEMES = {
     # GENRA CHOP: retro cream (MPC60 / MPC Live II Retro), green MPC 2000 LCD - the defaults above
     "GENRA CHOP": {},
     # SCHLAG: black (MPC3000 LE)
-    "SCHLAG": dict(GREY_LCD, DARK=(0x33, 0x33, 0x33), CREAM=(0xE8, 0xE8, 0xE4), GREY=(0x8C, 0x8C, 0x88),
+    "GENRA SCHLAG": dict(GREY_LCD, DARK=(0x33, 0x33, 0x33), CREAM=(0xE8, 0xE8, 0xE4), GREY=(0x8C, 0x8C, 0x88),
                    KEY_OFF=(0x55, 0x55, 0x52), PAD=(0x6A, 0x6A, 0x66), LANE=(0x44, 0x44, 0x44),
                    KNOB=(0x48, 0x48, 0x48), RED=(0xD3, 0x2F, 0x2F), RED_LIT=(0xE8, 0x4A, 0x40),
                    L_DARK="ffe8e8e4", L_MUTED="ffa8a8a4", L_CREAM="ffe8e8e4", L_CREAM_MUTED="ff9a9a96",
@@ -281,6 +281,37 @@ class Images:
             return i
         return self._write("ring%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
 
+    def step_cells(self, w, h):
+        """STEPS: 72 frames = ((base * 3 + nudge) * 3 + dot) * 2 + selected.
+        base: 0/1 empty (beat groups), 2 soft hit, 3 loud hit; nudge: 1 early, 2 late; dot: 1 own values, 2 own RANDOM."""
+        def frame(f):
+            sel, dot, nudge, base = f % 2, (f // 2) % 3, (f // 6) % 3, f // 18
+            i = Img(w, h)
+            col = ((0x44, 0x44, 0x44), (0x3C, 0x3C, 0x3C), (0xA8, 0xA8, 0xA2), (0xE0, 0xE0, 0xDA))[base]
+            i.rect(0, 0, w, h, col, 5)
+            if nudge:
+                i.rect(6 if nudge == 1 else w - 10, 8, 4, h - 16, RED, 1)
+            if dot == 1:
+                i.rect(w - 15, 5, 9, 9, RED, 4)
+            elif dot == 2:
+                i.rect(w // 2 - 14, h - 9, 28, 4, RED, 1)
+                i.rect(w - 15, 5, 9, 9, RED, 4)
+            if sel:
+                blue = (0x4D, 0xA3, 0xFF)
+                for x0, y0, ww, hh in ((0, 0, w, 3), (0, h - 3, w, 3), (0, 0, 3, h), (w - 3, 0, 3, h)):
+                    i.rect(x0, y0, ww, hh, blue, 0)
+            return i
+        return self._write("stepcell_%dx%d_strip.png" % (w, h), lambda: strip([frame(f) for f in range(72)]))
+
+    def play_head(self, w, h):
+        def frame(f):
+            i = Img(w, h)
+            if f:
+                for x0, y0, ww, hh in ((0, 0, w, 3), (0, h - 3, w, 3), (0, 0, 3, h), (w - 3, 0, 3, h)):
+                    i.rect(x0, y0, ww, hh, RED, 0)
+            return i
+        return self._write("playhead_%dx%d_strip.png" % (w, h), lambda: strip([frame(f) for f in range(2)]))
+
     def drum_cells(self, dead):
         def frame(f):
             i = Img(6, 18)
@@ -398,9 +429,9 @@ class Page:
             self.name(param, "%d %d 110 28" % (x + size + 8, y + 2), 21.0, name_colour)
             self.value(param, "%d %d 110 28" % (x + size + 8, y + 32), 19.0, value_colour)
 
-    def tab(self, name, index, qlink_bounds):
+    def tab(self, name, index, qlink_bounds, sub=0):
         comp = G.component_definition([], self.c, self.style["background"])
-        return G.obj(("version", 1), ("tabName", name), ("fnKeyIndex", index), ("fnKeySubIndex", 0),
+        return G.obj(("version", 1), ("tabName", name), ("fnKeyIndex", index), ("fnKeySubIndex", sub),
                      ("componentDefinition", comp), ("qlinkBoundsData", list(qlink_bounds)))
 
 
@@ -598,11 +629,14 @@ def schlag_header(p):
     p.caption("schlag", "20 8 170 48", 34.0, L_RED)
 
 
-def schlag_main(p):
+def schlag_main(p, funcs=False):
     img = p.img
     schlag_header(p)
     p.lcd("196 9 370 46")
-    p.value("KOPFLINK", "208 9 350 46", 19.0, L_LCD)
+    if funcs:  # the 2nd press of the function key: the Q-Links on the function slots
+        p.caption("qlfuncs", "208 9 350 46", 19.0, L_LCD)
+    else:
+        p.value("KOPFLINK", "208 9 350 46", 19.0, L_LCD)
     p.radio("AUTO PADS", ("auto", "padsmode"), (576, 660), 9, 80, 46, 19.0)
     p.key("UNDO", GREY, "undo", "746 9 120 46", 20.0, L_KEYINK)
     p.key("BASIC", GREY, "basic", "872 9 120 46", 20.0, L_KEYINK)
@@ -628,8 +662,11 @@ def schlag_main(p):
         for j in range(16):
             p.film(cells, 3, "ZELLE %d %d" % (v + 1, j + 1), "%d 215 6 18" % (x + 11 + int(round(j * 7.9))))
         p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 244 72 72" % (x + 36), ring)
+        p.value("RINGTEXT %d" % (v + 1), "%d 266 52 28" % (x + 46), 15.0, L_CREAM, CENTRED)
+        # what RANDOM does (tap = the next kind)
         p.lcd("%d 322 62 26" % (x + 8), dead)
-        p.value("RANDOM %s" % VOICE_NAMES[v], "%d 322 62 26" % (x + 8), 15.0, ink, CENTRED)
+        p.value("KIND %s" % VOICE_NAMES[v], "%d 322 62 26" % (x + 8), 12.0, ink, CENTRED)
+        p.button("KIND TAP %d" % (v + 1), "%d 322 62 26" % (x + 8))
         # HOLD | LIVE: grey = HOLD (the roll stays), red = LIVE (every pass rolls again); the text is the value
         hb = "%d 322 62 26" % (x + 75)
         p.film(img.state(1, 2, 62, 26), 2, "LIVE %s" % VOICE_NAMES[v], hb)
@@ -647,6 +684,46 @@ def schlag_main(p):
         p.film(pad, 2, "PADLICHT %d" % (v + 1), "%d 558 145 62" % x)
         p.caption("p%d" % (v + 1), "%d 560 40 24" % (x + 8), 15.0, L_PAD)
         p.button("PAD %d" % (v + 1), "%d 558 145 62" % x)
+
+
+def schlag_main_funcs(p):
+    schlag_main(p, True)
+
+
+def schlag_steps(p):
+    """STEPS: GENRA's drum pattern, 8 voices x 16 steps of a bar; tap a step to give it its own values."""
+    img = p.img
+    schlag_header(p)
+    p.caption("stepstitle", "180 8 220 48", 24.0, L_MUTED)
+    p.radio("BAR", ("bar1", "bar2", "bar3", "bar4"), (420, 532, 644, 756), 10, 104, 44, 18.0)
+    p.lcd("880 10 380 44")
+    p.value("STEPPOS", "892 10 360 44", 17.0, L_LCD)
+    cells, head = img.step_cells(64, 44), img.play_head(68, 398)
+    for v in range(8):
+        y = 66 + v * 50
+        p.dark("20 %d 104 44" % y)
+        p.caption("v%d" % (v + 1), "30 %d 94 44" % y, 15.0, L_CREAM)
+        for j in range(16):
+            p.film(cells, 72, "SCHRITT %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, y))
+    for j in range(16):
+        p.film(head, 2, "KOPFSPALTE %d" % (j + 1), "%d 64 68 398" % (130 + j * 70))
+    for v in range(8):
+        for j in range(16):
+            p.button("STEP TAP %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, 66 + v * 50))
+    y = 474
+    p.dark("20 %d 1240 146" % y)
+    p.value("STEPKOPF", "34 %d 210 30" % (y + 6), 17.0, L_CREAM)
+    p.caption("steph1", "34 %d 210 40" % (y + 40), 12.0, L_MUTED)
+    p.caption("steph2", "34 %d 210 30" % (y + 80), 12.0, L_MUTED)
+    knob = img.knob(48)
+    names = ["RANDOM"] + ["TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"]
+    for i, n in enumerate(names):
+        cx = 300 + i * 96
+        p.lcd("%d %d 88 22" % (cx - 44, y + 8))
+        p.caption("lk%d" % i, "%d %d 88 22" % (cx - 44, y + 8), 12.0, L_LCD, CENTRED)
+        p.knob_only("STEP %s" % n, "%d %d 48 48" % (cx - 24, y + 38), knob)
+        p.value("STEPWERT %d" % (i + 1), "%d %d 92 28" % (cx - 46, y + 106), 14.0, L_CREAM, CENTRED)
+    p.key("CLEAR STEP", GREY, "clearstep", "1150 %d 100 120" % (y + 13), 16.0, L_KEYINK)
 
 
 def schlag_folder(p):
@@ -759,23 +836,33 @@ def main():
                                 9: idx["DENS DRUMS"], 10: idx["DENS BASS"], 11: idx["DENS MELODY"], 12: idx["DENS PADS"]},
                             2: {1: idx["STYLE"], 2: idx["LENGTH"], 3: idx["VOLUME"]}})
         program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
-    elif plugin == "SCHLAG":
+    elif plugin == "GENRA SCHLAG":
         cls = SchlagPage
-        pages = (("SCHLAG", schlag_main, []), ("FOLDER", schlag_folder, ["801 466 298 123"]),
-                 ("PRINT", schlag_print, []), ("SETUP", schlag_setup, []))
-        choices = {"AUTO PADS": ["Auto", "Pads"], "VOICE": VOICE_NAMES}
+        # the 2nd press of SCHLAG's function key: the same page, the Q-Links on the function slots (sub-tab)
+        pages = (("SCHLAG", schlag_main, [], 0, 0), ("SCHLAG", schlag_main_funcs, [], 0, 1),
+                 ("FOLDER", schlag_folder, ["801 466 298 123"], 1, 0), ("STEPS", schlag_steps, [], 2, 0),
+                 ("PRINT", schlag_print, [], 3, 0), ("SETUP", schlag_setup, [], 4, 0))
+        choices = {"AUTO PADS": ["Auto", "Pads"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
         q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
         q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
-        screen = tabmap(4, {0: q, 1: {13: idx["LIST"]}})
+        qf = {v + 1: idx["VALUE %d 1" % (v + 1)] for v in range(8)}
+        qf.update({v + 9: idx["VALUE %d 2" % (v + 1)] for v in range(8)})
+        qs = {i + 1: idx["STEP %s" % n] for i, n in enumerate(
+            ["RANDOM", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
+        screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))
+                  for key, sub, a in ((0, 0, q), (0, 1, qf), (1, 0, {13: idx["LIST"]}), (2, 0, qs), (3, 0, {}),
+                                      (4, 0, {}))]
         program = qmap(q)
     else:
         print("build_skin: unknown plugin %s" % plugin)
         return 1
 
-    for i, (name, fn, ql) in enumerate(pages):
+    for i, pdef in enumerate(pages):
+        name, fn, ql = pdef[:3]
+        key, sub = (pdef[3], pdef[4]) if len(pdef) > 3 else (i, 0)
         pg = cls(h, style, defs, img)
         fn(pg)
-        tabs.append(pg.tab(name, i, ql))
+        tabs.append(pg.tab(name, key, ql, sub))
     for k, v in page_data:
         if k == "componentDefinitions":
             local = dict(v)["localComponentDefinitions"]
@@ -800,7 +887,7 @@ def main():
         f.write(G.dump_json(tui) + "\n")
     with open(os.path.join(out_dir, "Q-Links.json"), "w", encoding="utf-8", newline="\n") as f:
         f.write(G.dump_json(qlinks) + "\n")
-    print("build_skin: %s: wrote %s (%d images)" % (plugin, ", ".join(n for n, _, _ in pages), len(img.done)))
+    print("build_skin: %s: wrote %s (%d images)" % (plugin, ", ".join(pd[0] for pd in pages), len(img.done)))
     return 0
 
 
