@@ -282,10 +282,11 @@ class Images:
         return self._write("ring%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
 
     def step_cells(self, w, h):
-        """STEPS: 72 frames = ((base * 3 + nudge) * 3 + dot) * 2 + selected.
-        base: 0/1 empty (beat groups), 2 soft hit, 3 loud hit; nudge: 1 early, 2 late; dot: 1 own values, 2 own RANDOM."""
+        """STEPS: 144 frames = (((base * 3 + nudge) * 3 + dot) * 2 + own sample) * 2 + selected.
+        base: 0/1 empty (beat groups), 2 soft hit, 3 loud hit; nudge: 1 early, 2 late; dot: 1 own values, 2 own RANDOM;
+        own sample: a blue square top left."""
         def frame(f):
-            sel, dot, nudge, base = f % 2, (f // 2) % 3, (f // 6) % 3, f // 18
+            sel, smp, dot, nudge, base = f % 2, (f // 2) % 2, (f // 4) % 3, (f // 12) % 3, f // 36
             i = Img(w, h)
             col = ((0x44, 0x44, 0x44), (0x3C, 0x3C, 0x3C), (0xA8, 0xA8, 0xA2), (0xE0, 0xE0, 0xDA))[base]
             i.rect(0, 0, w, h, col, 5)
@@ -296,12 +297,14 @@ class Images:
             elif dot == 2:
                 i.rect(w // 2 - 14, h - 9, 28, 4, RED, 1)
                 i.rect(w - 15, 5, 9, 9, RED, 4)
+            if smp:
+                i.rect(6, 5, 9, 9, (0x4D, 0xA3, 0xFF), 1)
             if sel:
                 blue = (0x4D, 0xA3, 0xFF)
                 for x0, y0, ww, hh in ((0, 0, w, 3), (0, h - 3, w, 3), (0, 0, 3, h), (w - 3, 0, 3, h)):
                     i.rect(x0, y0, ww, hh, blue, 0)
             return i
-        return self._write("stepcell_%dx%d_strip.png" % (w, h), lambda: strip([frame(f) for f in range(72)]))
+        return self._write("stepcell144_%dx%d_strip.png" % (w, h), lambda: strip([frame(f) for f in range(144)]))
 
     def play_head(self, w, h):
         def frame(f):
@@ -617,7 +620,8 @@ def chop_setup(p):
 
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
-                "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE"]
+                "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP", "SAMPLE BACK", "SAMPLE NEXT",
+                "CONDITION BACK", "CONDITION NEXT", "HIT"]
 DEAD_VOICES = {6: 4}  # TOM: a dying display (value: the damage pattern)
 
 
@@ -704,26 +708,40 @@ def schlag_steps(p):
         p.dark("20 %d 104 44" % y)
         p.caption("v%d" % (v + 1), "30 %d 94 44" % y, 15.0, L_CREAM)
         for j in range(16):
-            p.film(cells, 72, "SCHRITT %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, y))
+            p.film(cells, 144, "SCHRITT %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, y))
     for j in range(16):
         p.film(head, 2, "KOPFSPALTE %d" % (j + 1), "%d 64 68 398" % (130 + j * 70))
     for v in range(8):
+        p.button("LANE TAP %d" % (v + 1), "20 %d 104 44" % (66 + v * 50))  # the name: the whole lane in the editor
         for j in range(16):
             p.button("STEP TAP %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, 66 + v * 50))
     y = 474
     p.dark("20 %d 1240 146" % y)
-    p.value("STEPKOPF", "34 %d 210 30" % (y + 6), 17.0, L_CREAM)
-    p.caption("steph1", "34 %d 210 40" % (y + 40), 12.0, L_MUTED)
-    p.caption("steph2", "34 %d 210 30" % (y + 80), 12.0, L_MUTED)
-    knob = img.knob(48)
-    names = ["RANDOM"] + ["TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"]
+    p.value("STEPKOPF", "34 %d 210 28" % (y + 4), 16.0, L_CREAM)
+    # a step's own sample (from the voice's folder) and CONDITION
+    p.caption("smpcap", "34 %d 196 16" % (y + 34), 11.0, L_MUTED)
+    p.key("SAMPLE BACK", GREY, "lt", "34 %d 30 34" % (y + 52), 18.0, L_KEYINK)
+    p.lcd("68 %d 128 34" % (y + 52))
+    p.value("STEPSAMPLE", "70 %d 124 34" % (y + 52), 13.0, L_LCD, CENTRED)
+    p.key("SAMPLE NEXT", GREY, "gt", "200 %d 30 34" % (y + 52), 18.0, L_KEYINK)
+    p.caption("condcap", "34 %d 196 16" % (y + 90), 11.0, L_MUTED)
+    p.key("CONDITION BACK", GREY, "lt", "34 %d 30 32" % (y + 108), 18.0, L_KEYINK)
+    p.lcd("68 %d 128 32" % (y + 108))
+    p.value("STEPCOND", "70 %d 124 32" % (y + 108), 13.0, L_LCD, CENTRED)
+    p.key("CONDITION NEXT", GREY, "gt", "200 %d 30 32" % (y + 108), 18.0, L_KEYINK)
+    knob = img.knob(44)
+    names = ["RANDOM", "LEVEL", "CHANCE", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"]
+    lk = {"RANDOM": 0, "LEVEL": 9, "CHANCE": 10}
     for i, n in enumerate(names):
-        cx = 300 + i * 96
-        p.lcd("%d %d 88 22" % (cx - 44, y + 8))
-        p.caption("lk%d" % i, "%d %d 88 22" % (cx - 44, y + 8), 12.0, L_LCD, CENTRED)
-        p.knob_only("STEP %s" % n, "%d %d 48 48" % (cx - 24, y + 38), knob)
-        p.value("STEPWERT %d" % (i + 1), "%d %d 92 28" % (cx - 46, y + 106), 14.0, L_CREAM, CENTRED)
-    p.key("CLEAR STEP", GREY, "clearstep", "1150 %d 100 120" % (y + 13), 16.0, L_KEYINK)
+        cx = 290 + i * 80
+        k = lk.get(n, ["TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"].index(n) + 1 if n not in lk else 0)
+        p.lcd("%d %d 74 22" % (cx - 37, y + 10))
+        p.caption("lk%d" % k, "%d %d 74 22" % (cx - 37, y + 10), 10.0, L_LCD, CENTRED)
+        p.knob_only("STEP %s" % n, "%d %d 44 44" % (cx - 22, y + 48), knob)
+        p.value("STEPWERT %d" % (k + 1), "%d %d 80 26" % (cx - 40, y + 105), 13.0, L_CREAM, CENTRED)
+    p.key("HIT", RED, "hit1", "1150 %d 100 57" % (y + 13), 15.0)
+    p.caption("hit2", "1150 %d 100 20" % (y + 44), 12.0, L_WHITE, CENTRED)
+    p.key("CLEAR STEP", GREY, "clearstep", "1150 %d 100 57" % (y + 76), 14.0, L_KEYINK)
 
 
 def schlag_folder(p):
@@ -848,7 +866,7 @@ def main():
         qf = {v + 1: idx["VALUE %d 1" % (v + 1)] for v in range(8)}
         qf.update({v + 9: idx["VALUE %d 2" % (v + 1)] for v in range(8)})
         qs = {i + 1: idx["STEP %s" % n] for i, n in enumerate(
-            ["RANDOM", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
+            ["RANDOM", "LEVEL", "CHANCE", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
         screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))
                   for key, sub, a in ((0, 0, q), (0, 1, qf), (1, 0, {13: idx["LIST"]}), (2, 0, qs), (3, 0, {}),
                                       (4, 0, {}))]

@@ -43,7 +43,8 @@ using namespace genrafiles;
 namespace {
 
 static const int kVoices = 8, kSlots = 2, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
-static const int kMaxFiles = 24, kFlashes = 14;
+static const int kMaxFiles = 128, kFlashes = 19;
+static const size_t kMaxVoiceBytes = 16u << 20; // the samples of one voice: at most 16 MB in memory
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
 static const float kMaxSeconds = 2.f;
@@ -55,7 +56,11 @@ const int kDefaultFunc[kSlots] = {F_TUNE, F_DECAY};
 enum RandomKind { RK_SAMPLE, RK_POOL, RK_PITCH, RK_GHOST, RK_SHORT, RK_FLIP, RK_TEXTURE, NUM_RKINDS };
 const char* const kRandomKinds[NUM_RKINDS] = {"SAMPLE", "POOL", "PITCH", "GHOST", "SHORT", "FLIP", "TEXTURE"};
 // STEPS: per step RANDOM and the 8 functions (a lock overrides the main page for that step only)
-static const int kLocks = 1 + NUM_FUNCS, kGrid = 8 * 16;
+// lock order: 0 RANDOM, 1..8 the functions, 9 LEVEL (dB), 10 CHANCE (%)
+static const int kLocks = 3 + NUM_FUNCS, kGrid = 8 * 16, LK_LEVEL = 1 + NUM_FUNCS, LK_CHANCE = 2 + NUM_FUNCS;
+// CONDITION per step (pass of the loop): 0 = none (GENRA's), then n of 2 / n of 4 / not the 1st pass
+static const int NUM_CONDS = 8;
+const char* const kCondNames[NUM_CONDS] = {"—", "1st of 2", "2nd of 2", "1st of 4", "2nd of 4", "3rd of 4", "4th of 4", "not 1st"};
 
 static const char* const kCaptions[][2] = {
     {"schlag", "SCHLAG"}, {"auto", "AUTO"}, {"padsmode", "PADS"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
@@ -74,7 +79,9 @@ static const char* const kCaptions[][2] = {
     {"bar1", "BAR 1"}, {"bar2", "BAR 2"}, {"bar3", "BAR 3"}, {"bar4", "BAR 4"}, {"clearstep", "CLEAR STEP"},
     {"lk0", "RANDOM"}, {"lk1", "TUNE"}, {"lk2", "DECAY"}, {"lk3", "DRIVE"}, {"lk4", "BITS"}, {"lk5", "REPEAT"},
     {"lk6", "PAN"}, {"lk7", "REVERSE"}, {"lk8", "FILTER"}, {"qlfuncs", "Q-LINKS: FUNCTIONS"},
-    {"steph1", "tap a step to set its own values"}, {"steph2", "— = the main page's value"}};
+    {"steph1", "tap a step to set its own values"}, {"steph2", "— = the main page's value"}, {"lk9", "LEVEL"},
+    {"lk10", "CHANCE"}, {"smpcap", "SAMPLE"}, {"condcap", "CONDITION"}, {"hit1", "HIT"}, {"hit2", "ON / OFF"},
+    {"lt", "<"}, {"gt", ">"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -93,7 +100,8 @@ enum
     P_BAR = P_RKIND0 + kVoices,           // STEPS: the bar shown
     P_SLK0,                               // STEPS: the selected step's RANDOM + 8 functions (knobs)
     // buttons
-    P_NEW = P_SLK0 + kLocks, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP, // flashes 0..13
+    P_NEW = P_SLK0 + kLocks, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
+    P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT,  // flashes 0..18
     P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
@@ -101,9 +109,10 @@ enum
     P_ROWTAP0 = P_PADTAP0 + kVoices,
     P_RKINDTAP0 = P_ROWTAP0 + kRows,      // tap the RANDOM field: the next kind
     P_STEPTAP0 = P_RKINDTAP0 + kVoices,   // STEPS: v * 16 + column
+    P_LANETAP0 = P_STEPTAP0 + kGrid,      // STEPS: a voice's name = the whole lane in the editor
     // texts
-    P_HDRLINK = P_STEPTAP0 + kGrid, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
-    P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS,
+    P_HDRLINK = P_LANETAP0 + kVoices, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
+    P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT,
     P_SLKTXT0,                            // the step knobs' values ("—" = the main page's)
     P_RINGTXT0 = P_SLKTXT0 + kLocks,      // the RANDOM amount in the ring
     P_FOLDERTXT0 = P_RINGTXT0 + kVoices,
@@ -116,7 +125,7 @@ enum
     P_LAMP0 = P_CELL0 + kVoices * 16,
     P_PADLIT0 = P_LAMP0 + kVoices,
     P_FLASH0 = P_PADLIT0 + kVoices,
-    P_SCELL0 = P_FLASH0 + kFlashes,       // STEPS cells: v * 16 + column (72 frames, see cellFrame)
+    P_SCELL0 = P_FLASH0 + kFlashes,       // STEPS cells: v * 16 + column (144 frames, see stepTexts)
     P_PLAY0 = P_SCELL0 + kGrid,           // STEPS: the play head, per column
     P_COUNT = P_PLAY0 + 16
 };
@@ -220,11 +229,14 @@ public:
         addParam(choiceParam("bar", "BAR", {"1", "2", "3", "4"}, 0));
         for (int i = 0; i < kLocks; ++i)
         {
-            Param q = floatParam(("step_" + std::string(i ? kFuncNames[i - 1] : "RANDOM")).c_str(), ("STEP " + std::string(i ? kFuncNames[i - 1] : "RANDOM")).c_str(), 0.f, 100.f, i ? defaultValue(i - 1) : 0.f, "", 0);
+            std::string n = lockName(i);
+            Param q = i == LK_LEVEL ? floatParam(("step_" + n).c_str(), ("STEP " + n).c_str(), -40.f, 6.f, 0.f, "dB", 1)
+                                    : floatParam(("step_" + n).c_str(), ("STEP " + n).c_str(), 0.f, 100.f, lockDefault(i), "", 0);
             q.automatable = false;
             addParam(q);
         }
-        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP"})
+        for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP",
+                              "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -234,9 +246,10 @@ public:
         for (int r = 0; r < kRows; ++r) addButton(("TIPP " + std::to_string(r + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addButton(("KIND TAP " + std::to_string(v + 1)).c_str());
         for (int i = 0; i < kGrid; ++i) addButton(("STEP TAP " + std::to_string(i / 16 + 1) + " " + std::to_string(i % 16 + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addButton(("LANE TAP " + std::to_string(v + 1)).c_str());
         for (const char* t : {"KOPFLINK", "PFAD", "LISTINFO", "STIMMINFO", "STIMMORDNER", "STIMMSAMPLE", "STIMMANZAHL",
                               "STATUS", "PRINTINFO", "PRINTSTATUS", "PRINTORDNER", "LERNINFO", "BELEGUNG", "HAUPTORDNER",
-                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS"})
+                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND"})
             addText(t);
         for (int i = 0; i < kLocks; ++i) addText(("STEPWERT " + std::to_string(i + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("RINGTEXT " + std::to_string(v + 1)).c_str());
@@ -260,13 +273,13 @@ public:
         for (int i = 0; i < kVoices * 16; ++i) screen_.strip(P_CELL0 + i, 3);
         for (int v = 0; v < kVoices; ++v) { screen_.strip(P_LAMP0 + v, 2); screen_.strip(P_PADLIT0 + v, 2); }
         for (int i = 0; i < kFlashes; ++i) screen_.button(P_NEW + i, P_FLASH0 + i);
-        for (int i = P_FUNCTAP0; i < P_STEPTAP0 + kGrid; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
-        for (int i = 0; i < kGrid; ++i) screen_.strip(P_SCELL0 + i, 72);
+        for (int i = P_FUNCTAP0; i < P_LANETAP0 + kVoices; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
+        for (int i = 0; i < kGrid; ++i) screen_.strip(P_SCELL0 + i, 144);
         for (int j = 0; j < 16; ++j) screen_.strip(P_PLAY0 + j, 2);
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.7 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.8 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -275,6 +288,8 @@ public:
             for (auto& r : retired_[v]) r.store(nullptr);
             seed_[v].store(1u + (uint32_t)v * 97u);
             for (auto& st : lock_[v]) for (auto& x : st) x.store(std::numeric_limits<float>::quiet_NaN());
+            for (auto& x : smpLock_[v]) x.store(-1);
+            for (auto& x : condLock_[v]) x.store(0);
             swapped_[v].store(0);
             holdRound_[v].store(0);
             lastRound_[v].store(0);
@@ -309,7 +324,7 @@ public:
         i.name = "GENRA SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 700;
+        i.version = 800;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -364,7 +379,14 @@ public:
         // the loop that plays: a new one from GENRA CHOP takes over at the end of the pattern (or at once when stopped)
         const Transport& tr0 = ctx.transport;
         const bool playing0 = tr0.valid && tr0.playing && tr0.ppqValid;
-        if (cur_ < 0 || !playing0) { int r = ready_.load(std::memory_order_acquire); if (r >= 0) cur_ = r; }
+        // a hand edit (STEPS: HIT ON / OFF) is taken at once; a new loop at the end of the pattern
+        if (cur_ < 0 || !playing0 || readyNow_.exchange(false)) { int r = ready_.load(std::memory_order_acquire); if (r >= 0) cur_ = r; }
+        // STEPS: a sample chosen for a step plays once to listen
+        if (int a = audition_.exchange(0))
+        {
+            int v = (a - 1) / 1024, idx = (a - 1) % 1024;
+            if (v >= 0 && v < kVoices) triggerSample(v, idx);
+        }
         if (cur_ >= 0) inUse_.store(cur_, std::memory_order_release);
         const genralink::Loop* loop = cur_ >= 0 ? &loops_[cur_] : nullptr;
         long len = L ? (long)L->loopSteps.load(std::memory_order_relaxed) : 0;
@@ -412,10 +434,12 @@ public:
                 }
                 uint32_t round = (uint32_t)((n - pos) / len) + wraps_ * 7919u; // the pass of the loop
                 double base = (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0);
+                const uint32_t pass = (uint32_t)((n - pos) / len);
                 for (int v = 0; v < kVoices; ++v)
                 {
                     const genralink::DrumHit& h = loop->drum[v][s];
                     if (!h.vel) continue;
+                    if (!stepPlays(v, s, pass)) continue; // STEPS: the step's own CHANCE / CONDITION
                     if (h.cond == 1 && (round & 1u)) continue;
                     if (h.chance < 255 && ((uint32_t)(s * 131 + v * 17 + round * 7919) * 2654435761u >> 24) > h.chance) continue;
                     int rat = std::max(1, (int)h.ratchet);
@@ -552,6 +576,14 @@ public:
                     std::snprintf(b, sizeof b, "%d %d %d %.2f\n", v, st, i, x);
                     s += b;
                 }
+        // a step's own sample (100) and CONDITION (101), in the same line format
+        for (int v = 0; v < kVoices; ++v)
+            for (int st = 0; st < kSteps; ++st)
+            {
+                char b[48];
+                if (smpLock_[v][st].load() >= 0) { std::snprintf(b, sizeof b, "%d %d 100 %d\n", v, st, (int)smpLock_[v][st].load()); s += b; }
+                if (condLock_[v][st].load() > 0) { std::snprintf(b, sizeof b, "%d %d 101 %d\n", v, st, (int)condLock_[v][st].load()); s += b; }
+            }
         out.assign(s.begin(), s.end());
     }
 
@@ -562,6 +594,8 @@ public:
         const bool v2 = s.compare(0, 4, "SG2\n") == 0;
         if (!v2 && s.compare(0, 4, "SG1\n") != 0) return;
         for (auto& a : lock_) for (auto& b : a) for (auto& c : b) c.store(std::numeric_limits<float>::quiet_NaN());
+        for (auto& a : smpLock_) for (auto& b : a) b.store(-1);
+        for (auto& a : condLock_) for (auto& b : a) b.store(0);
         size_t lk = s.find("\nLOCKS\n");
         if (lk != std::string::npos)
         {
@@ -573,7 +607,12 @@ public:
             int n = 0;
             while (std::sscanf(c, "%d %d %d %f\n%n", &v, &st, &i, &x, &n) == 4 && n > 0)
             {
-                if (v >= 0 && v < kVoices && st >= 0 && st < kSteps && i >= 0 && i < kLocks) lock_[v][st][i].store(x);
+                if (v >= 0 && v < kVoices && st >= 0 && st < kSteps)
+                {
+                    if (i >= 0 && i < kLocks) lock_[v][st][i].store(x);
+                    else if (i == 100) smpLock_[v][st].store((int16_t)clamp((int)x, -1, kMaxFiles - 1));
+                    else if (i == 101) condLock_[v][st].store((int8_t)clamp((int)x, 0, NUM_CONDS - 1));
+                }
                 c += n;
                 n = 0;
             }
@@ -614,8 +653,7 @@ public:
         if (index >= P_RANDOM0 && index < P_RANDOM0 + kVoices) { std::snprintf(b, sizeof b, "%.0f %%", plain); out = b; return true; }
         if (index >= P_LIVE0 && index < P_LIVE0 + kVoices) { out = plain >= 0.5f ? "LIVE" : "HOLD"; return true; }
         if (index >= P_RKIND0 && index < P_RKIND0 + kVoices) { out = kRandomKinds[clamp((int)std::lround(plain), 0, NUM_RKINDS - 1)]; return true; }
-        if (index == P_SLK0) { std::snprintf(b, sizeof b, "%.0f %%", plain); out = b; return true; }
-        if (index > P_SLK0 && index < P_SLK0 + kLocks) { out = valueText(index - P_SLK0 - 1, plain); return true; }
+        if (index >= P_SLK0 && index < P_SLK0 + kLocks) { out = lockText(index - P_SLK0, plain); return true; }
         if (index >= P_LEVEL0 && index < P_LEVEL0 + kVoices) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
         if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots)
         {
@@ -655,6 +693,22 @@ private:
             case F_REVERSE: std::snprintf(b, sizeof b, v >= 50.f ? "on" : "off"); break;
             default: if (v >= 99.5f) std::snprintf(b, sizeof b, "open"); else std::snprintf(b, sizeof b, "LP %.1fk", cutoffHz(v) / 1000.f); break;
         }
+        return b;
+    }
+    static std::string lockName(int i)
+    {
+        if (i == 0) return "RANDOM";
+        if (i == LK_LEVEL) return "LEVEL";
+        if (i == LK_CHANCE) return "CHANCE";
+        return kFuncNames[i - 1];
+    }
+    static float lockDefault(int i) { return i == 0 ? 0.f : i == LK_LEVEL ? 0.f : i == LK_CHANCE ? 100.f : defaultValue(i - 1); }
+    static std::string lockText(int i, float x)
+    {
+        char b[32];
+        if (i == 0 || i == LK_CHANCE) std::snprintf(b, sizeof b, "%.0f %%", x);
+        else if (i == LK_LEVEL) std::snprintf(b, sizeof b, "%+.1f dB", x);
+        else return valueText(i - 1, x);
         return b;
     }
     static int kitVoice(int note)
@@ -749,6 +803,43 @@ private:
     // the voice's positions that count for RANDOM: the loop's hits (AUTO) and the positions of the track's notes
     uint64_t hitMask(int v) const { return (autoNow_ ? loopMask_[v] : 0ull) | seenCur_[v] | seenPrev_[v]; }
 
+    // STEPS: does the step play this pass? (its own CHANCE and CONDITION; none = it plays)
+    bool stepPlays(int v, int step, uint32_t pass) const
+    {
+        step &= kSteps - 1;
+        switch (condLock_[v][step].load(std::memory_order_relaxed))
+        {
+            case 1: if (pass % 2u != 0) return false; break;
+            case 2: if (pass % 2u != 1) return false; break;
+            case 3: case 4: case 5: case 6: if (pass % 4u != (uint32_t)(condLock_[v][step].load() - 3)) return false; break;
+            case 7: if (pass == 0) return false; break;
+            default: break;
+        }
+        float c = lockAt(v, step, LK_CHANCE);
+        if (std::isnan(c) || c >= 100.f) return true;
+        uint32_t h = mix((uint32_t)step * 2246822519u ^ (uint32_t)v * 3266489917u ^ pass * 668265263u ^ 0x5bd1e995u);
+        return (double)h < c / 100.0 * 4294967296.0;
+    }
+
+    // STEPS: listen to a sample of the voice's folder (the editor's SAMPLE < >)
+    void triggerSample(int v, int idx)
+    {
+        Kit* k = kit_[v].load(std::memory_order_acquire);
+        if (!k || k->samples.empty()) return;
+        const Sample& s = k->samples[(size_t)clamp(idx, 0, (int)k->samples.size() - 1)];
+        if (!s.frames()) return;
+        for (Player& q : players_[v]) if (q.active && q.fade < 0) q.fade = 64;
+        Player* p = &players_[v][0];
+        for (Player& q : players_[v]) if (!q.active) { p = &q; break; }
+        *p = Player();
+        p->s = &s;
+        p->owner = k;
+        p->rate = s.rate / sr_;
+        p->end = (double)s.frames() - 1.0;
+        p->gain = 0.8f * levelGain_[v];
+        p->active = true;
+    }
+
     void trigger(int v, float vel, int step, uint32_t round)
     {
         Kit* k = kit_[v].load(std::memory_order_acquire);
@@ -760,12 +851,15 @@ private:
         // the sample: SAMPLE = another one of the voice's folder, POOL = any of all eight voices' samples
         const Kit* kk = k;
         int si = k->base;
-        if (kind == RK_SAMPLE && k->samples.size() > 1)
+        // STEPS: a step's own sample (from the voice's folder); RANDOM then does not swap the sample there
+        const int own = step >= 0 ? smpLock_[v][step & (kSteps - 1)].load(std::memory_order_relaxed) : -1;
+        if (own >= 0 && own < (int)k->samples.size()) si = own;
+        else if (kind == RK_SAMPLE && k->samples.size() > 1)
         {
             int n = (int)k->samples.size(), alt = (int)(mix(roll ^ 0x85ebca6bu) % (uint32_t)(n - 1));
             si = alt >= k->base ? alt + 1 : alt;
         }
-        else if (kind == RK_POOL)
+        else if (kind == RK_POOL && own < 0)
         {
             int w = (int)(mix(roll ^ 0x27d4eb2fu) % (uint32_t)kVoices);
             const Kit* kw = kit_[w].load(std::memory_order_acquire);
@@ -805,7 +899,10 @@ private:
         p->panL = std::sqrt(0.5f * (1.f - pan)) * 1.4142f;
         p->panR = std::sqrt(0.5f * (1.f + pan)) * 1.4142f;
         if (kind == RK_GHOST) vel *= 0.3f;
-        p->gain = 0.9f * (0.15f + 0.85f * vel) * levelGain_[v];
+        float lg = levelGain_[v];
+        float lv = lockAt(v, step, LK_LEVEL); // STEPS: the step's own LEVEL
+        if (!std::isnan(lv)) lg *= std::pow(10.f, (lv - get(P_LEVEL0 + v)) / 20.f);
+        p->gain = 0.9f * (0.15f + 0.85f * vel) * lg;
         p->age = 0;
         p->fade = -1;
         p->active = true;
@@ -855,13 +952,17 @@ private:
             for (int i = 0; i < kMaxFiles; ++i) take.push_back((int)((long)i * (long)files.size() / kMaxFiles));
             if (std::find(take.begin(), take.end(), baseIdx) == take.end()) take[0] = baseIdx;
         }
+        // up to kMaxFiles samples or kMaxVoiceBytes in memory, whichever comes first (the chosen one always)
         Kit* k = new Kit();
+        size_t used = 0;
         for (int i : take)
         {
+            if (i != baseIdx && used >= kMaxVoiceBytes) continue;
             Wave w;
             if (!loadWav(folder + "/" + files[(size_t)i], w, kMaxSeconds)) continue;
             if (i == baseIdx) k->base = (int)k->samples.size();
             k->samples.push_back(toSample(w, stripWav(files[(size_t)i])));
+            used += (k->samples.back().L.size() + k->samples.back().R.size()) * 2;
         }
         if (k->samples.empty()) { delete k; return false; }
         for (auto& r : retired_[v]) delete r.exchange(nullptr);
@@ -1175,26 +1276,42 @@ private:
     bool hasLock(int v, int st) const
     {
         for (int i = 0; i < kLocks; ++i) if (!std::isnan(lock_[v][st][i].load())) return true;
-        return false;
+        return condLock_[v][st].load() > 0;
     }
-    // the editor's knobs show the selected step's own values, else the main page's; a knob turned = the step's own
+    // a lane's (the main page's) value behind editor knob i, and where it is written
+    float laneValue(int v, int i) const
+    {
+        if (i == 0) return get(P_RANDOM0 + v);
+        if (i == LK_LEVEL) return get(P_LEVEL0 + v);
+        if (i == LK_CHANCE) return 100.f;
+        return funcValue(v, i - 1, 0.f);
+    }
+    void setLaneValue(int v, int i, float x)
+    {
+        if (i == 0) setParam(P_RANDOM0 + v, x);
+        else if (i == LK_LEVEL) setParam(P_LEVEL0 + v, x);
+        else if (i != LK_CHANCE) { setParam(P_FV0 + v * NUM_FUNCS + i - 1, x); syncSlots(true); }
+    }
+    // the editor's knobs: a step (its own values, else the main page's; a knob turned = the step's own) or a whole
+    // lane (the main page's values, written there)
     void syncLocks(bool force)
     {
-        const int v = stepSel_ >= 0 ? stepSel_ / kSteps : -1, st = stepSel_ >= 0 ? stepSel_ % kSteps : 0;
+        const int v = stepSel_ >= 0 ? stepSel_ / kSteps : laneSel_, st = stepSel_ >= 0 ? stepSel_ % kSteps : 0;
         for (int i = 0; i < kLocks; ++i)
         {
             float val = get(P_SLK0 + i);
             if (force)
             {
-                float x = v >= 0 ? lock_[v][st][i].load() : std::numeric_limits<float>::quiet_NaN();
-                if (std::isnan(x)) x = v < 0 ? (i ? defaultValue(i - 1) : 0.f) : i ? funcValue(v, i - 1, 0.f) : get(P_RANDOM0 + v);
+                float x = stepSel_ >= 0 ? lock_[v][st][i].load() : std::numeric_limits<float>::quiet_NaN();
+                if (std::isnan(x)) x = v < 0 ? lockDefault(i) : laneValue(v, i);
                 shownLk_[i] = x;
                 if (std::fabs(val - x) > 1e-4f) setParam(P_SLK0 + i, x);
             }
             else if (std::fabs(val - shownLk_[i]) > 1e-4f)
             {
                 shownLk_[i] = val;
-                if (v >= 0) lock_[v][st][i].store(val);
+                if (stepSel_ >= 0) lock_[v][st][i].store(val);
+                else if (laneSel_ >= 0) setLaneValue(laneSel_, i, val);
             }
         }
     }
@@ -1209,15 +1326,28 @@ private:
             for (int i = 0; i < kLocks; ++i)
             {
                 float x = lock_[v][st][i].load();
-                if (std::isnan(x)) screen_.setText(P_SLKTXT0 + i, "—");
-                else if (!i) { char b[16]; std::snprintf(b, sizeof b, "%.0f %%", x); screen_.setText(P_SLKTXT0 + i, b); }
-                else screen_.setText(P_SLKTXT0 + i, valueText(i - 1, x));
+                screen_.setText(P_SLKTXT0 + i, std::isnan(x) ? std::string("—") : lockText(i, x));
             }
+            int sm = smpLock_[v][st].load();
+            Kit* k = kit_[v].load();
+            screen_.setText(P_SMPTXT, sm >= 0 && k && sm < (int)k->samples.size() ? k->samples[(size_t)sm].name : std::string("—"));
+            screen_.setText(P_CONDTXT, kCondNames[clamp((int)condLock_[v][st].load(), 0, NUM_CONDS - 1)]);
+        }
+        else if (laneSel_ >= 0)
+        {
+            int v = laneSel_;
+            screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · whole lane");
+            for (int i = 0; i < kLocks; ++i) screen_.setText(P_SLKTXT0 + i, i == LK_CHANCE ? std::string("—") : lockText(i, laneValue(v, i)));
+            Kit* k = kit_[v].load();
+            screen_.setText(P_SMPTXT, k && !k->samples.empty() ? k->samples[(size_t)k->base].name : std::string("—"));
+            screen_.setText(P_CONDTXT, "—");
         }
         else
         {
             screen_.setText(P_STEPHDR, "tap a step");
             for (int i = 0; i < kLocks; ++i) screen_.setText(P_SLKTXT0 + i, "—");
+            screen_.setText(P_SMPTXT, "—");
+            screen_.setText(P_CONDTXT, "—");
         }
         int step = curStep_.load();
         screen_.setText(P_STEPPOS, step >= 0 ? std::string("playing: bar ") + bars[(step / 16) & 3] + " · step " + std::to_string(step % 16 + 1) : std::string("Stop"));
@@ -1227,7 +1357,7 @@ private:
             std::snprintf(b, sizeof b, "%.0f", get(P_RANDOM0 + v));
             screen_.setText(P_RINGTXT0 + v, b);
         }
-        // the grid: frame = ((base * 3 + nudge) * 3 + dot) * 2 + selected
+        // the grid: frame = (((base * 3 + nudge) * 3 + dot) * 2 + own sample) * 2 + selected
         const genralink::Loop& l = loop_;
         const bool autoMode = getInt(P_AUTO) == 0;
         for (int v = 0; v < kVoices; ++v)
@@ -1242,8 +1372,9 @@ private:
                 int nudge = !(autoMode && h.vel) ? 0 : h.off < -8 ? 1 : h.off > 8 ? 2 : 0;
                 float own = lock_[v][st][0].load();
                 int dot = !std::isnan(own) && own > 0.f ? 2 : hasLock(v, st) ? 1 : 0;
+                int smp = smpLock_[v][st].load() >= 0;
                 int sel = stepSel_ == v * kSteps + st;
-                screen_.setFrame(P_SCELL0 + v * 16 + j, ((base * 3 + nudge) * 3 + dot) * 2 + sel);
+                screen_.setFrame(P_SCELL0 + v * 16 + j, (((base * 3 + nudge) * 3 + dot) * 2 + smp) * 2 + sel);
             }
         }
         for (int j = 0; j < 16; ++j) screen_.setFrame(P_PLAY0 + j, step >= 0 && step / 16 == bar && step % 16 == j);
@@ -1365,6 +1496,7 @@ private:
                 if (want && !folder.empty() && !loadVoice(v, folder, file)) screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": folder missing");
             }
             bool on = L && alive.check(L->writerBeat.load(), nowMs());
+            linkAlive_ = on;
             if (L)
             {
                 uint32_t seq = 0;
@@ -1376,6 +1508,7 @@ private:
                     while (w == r || w == u) ++w;
                     loops_[w] = tmp;
                     ready_.store(w, std::memory_order_release);
+                    if (L->loopEditOf.load() == seq) readyNow_.store(true); // a hand edit: play it at once
                     for (auto& s : swapped_) s.store(0);
                 }
             }
@@ -1428,6 +1561,8 @@ private:
                 else if (p == P_CLEARSTEP && stepSel_ >= 0)
                 {
                     for (auto& x : lock_[stepSel_ / kSteps][stepSel_ % kSteps]) x.store(std::numeric_limits<float>::quiet_NaN());
+                    smpLock_[stepSel_ / kSteps][stepSel_ % kSteps].store(-1);
+                    condLock_[stepSel_ / kSteps][stepSel_ % kSteps].store(0);
                     syncLocks(true);
                     screen_.message(P_STATUS, "CLEAR STEP: the main page's values", 2500);
                 }
@@ -1440,7 +1575,53 @@ private:
                 {
                     int i = p - P_STEPTAP0, v = i / 16;
                     stepSel_ = v * kSteps + clamp(getInt(P_BAR), 0, 3) * 16 + i % 16;
+                    laneSel_ = -1;
                     syncLocks(true);
+                }
+                else if (p >= P_LANETAP0 && p < P_LANETAP0 + kVoices)
+                {
+                    laneSel_ = p - P_LANETAP0;
+                    stepSel_ = -1;
+                    syncLocks(true);
+                }
+                else if ((p == P_SMPPREV || p == P_SMPNEXT) && stepSel_ >= 0)
+                {
+                    int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
+                    Kit* k = kit_[v].load();
+                    int n = k ? (int)k->samples.size() : 0;
+                    if (n > 0)
+                    {
+                        // -1 (the voice's sample) .. n - 1
+                        int cur = smpLock_[v][st].load(), next = cur + (p == P_SMPNEXT ? 1 : -1);
+                        if (next >= n) next = -1;
+                        if (next < -1) next = n - 1;
+                        smpLock_[v][st].store((int16_t)next);
+                        audition_.store(v * 1024 + (next >= 0 ? next : k->base) + 1);
+                    }
+                }
+                else if (p == P_SMPPREV || p == P_SMPNEXT)
+                    screen_.message(P_STATUS, laneSel_ >= 0 ? "the lane's sample: page FOLDER" : "tap a step first", 2500);
+                else if ((p == P_CONDPREV || p == P_CONDNEXT) && stepSel_ >= 0)
+                {
+                    int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
+                    int c = (condLock_[v][st].load() + (p == P_CONDNEXT ? 1 : NUM_CONDS - 1)) % NUM_CONDS;
+                    condLock_[v][st].store((int8_t)c);
+                }
+                else if (p == P_HIT)
+                {
+                    // HIT ON / OFF: the step goes to GENRA CHOP's drum pattern (MIDI channel 10, PRINT, SCHLAG)
+                    genralink::LinkData* Ld = link_.data();
+                    if (stepSel_ < 0) screen_.message(P_STATUS, "tap a step first", 2500);
+                    else if (!Ld || !linkAlive_) screen_.message(P_STATUS, "HIT: needs GENRA CHOP (LINK)", 3000);
+                    else
+                    {
+                        int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
+                        bool on = loop_.drum[v][st].vel == 0;
+                        uint32_t w = Ld->editW.load();
+                        Ld->editCmd[w % genralink::LinkData::kEdits].store(v | st << 4 | (on ? 1 : 0) << 12);
+                        Ld->editW.store(w + 1, std::memory_order_release);
+                        screen_.message(P_STATUS, on ? "HIT ON: sent to GENRA CHOP" : "HIT OFF: sent to GENRA CHOP", 2500);
+                    }
                 }
                 else if (p == P_LEARN) pads_.startLearning();
                 else if (p == P_BACK) { browser_.up(); previewPath_.clear(); }
@@ -1533,6 +1714,12 @@ private:
     std::atomic<Sample*> previewRetired_[3];
     std::atomic<uint32_t> seed_[kVoices];
     std::atomic<float> lock_[kVoices][kSteps][kLocks];   // STEPS: a step's own values (NaN = none)
+    std::atomic<int16_t> smpLock_[kVoices][kSteps];      // STEPS: a step's own sample (index in the kit), -1 none
+    std::atomic<int8_t> condLock_[kVoices][kSteps];      // STEPS: a step's CONDITION (0 none)
+    std::atomic<int> audition_{0};                       // (v * 1024 + sample) + 1: play once
+    std::atomic<bool> readyNow_{false};
+    int laneSel_ = -1;                                   // worker: STEPS editor on a whole lane (voice), -1 none
+    bool linkAlive_ = false;
     int stepSel_ = -1;                                    // worker: the selected step (v * 64 + step), -1 none
     float shownLk_[kLocks] = {};
     std::atomic<bool> stepSync_{true};

@@ -114,6 +114,11 @@ struct LinkData
     // (LENGTH: AUTO = the MPC sequence's loop, or 16, 32, 64, 128); a new loop starts at the start of it
     std::atomic<int32_t>  loopSteps;
     std::atomic<int32_t>  loopStart; // where that loop starts, in steps on the MPC's time line (LENGTH AUTO)
+    std::atomic<uint32_t> loopEditOf; // the loopSeq of a loop that is only a hand edit: companions take it at once
+    // written by GENRA SCHLAG (STEPS, HIT ON / OFF): drum edits for GENRA CHOP, a small ring
+    static const int kEdits = 16;
+    std::atomic<uint32_t> editW;                // +1 per edit
+    std::atomic<int32_t>  editCmd[kEdits];      // voice | step << 4 | on << 12
 };
 
 class Link

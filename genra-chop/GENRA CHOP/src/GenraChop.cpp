@@ -330,7 +330,7 @@ public:
         i.name = "GENRA CHOP";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'C', 'h');
-        i.version = 700;
+        i.version = 800;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -457,7 +457,7 @@ public:
                 // A new loop (NEW, STYLE) starts at the end of the pattern.
                 long pos = ((n % len) + len) % len;
                 int s = (int)(pos % kSteps);
-                if (pos == 0) swapSeq();
+                if (pos == 0 || swapNow_.exchange(false)) swapSeq();
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
                 double at = (nextStep_ - q0) * spStep;
@@ -1025,7 +1025,7 @@ private:
         publishLoop();
     }
 
-    void publishLoop()
+    void publishLoop(bool edit = false)
     {
         hh::render(pat_, knobs_, rend_);
         {
@@ -1094,6 +1094,9 @@ private:
         l.swingX1000 = (uint16_t)std::lround(s->swing * 1000.f);
         l.style = (int16_t)set_.style;
         l.id = loopId_;
+        // a hand edit (SCHLAG's STEPS) plays at once, here and in SCHLAG; a new loop waits for the end of the pattern
+        if (genralink::LinkData* L = link_.data()) L->loopEditOf.store(edit ? L->loopSeq.load() + 2u : 0u);
+        if (edit) swapNow_.store(true);
         link_.writeLoop(l);
     }
 
@@ -1444,6 +1447,32 @@ private:
 
     void setParam(int i, float x) { set(i, x); notifyHostParameterChanged(i); }
 
+    // SCHLAG's STEPS: HIT ON / OFF on a drum step; the drum lane counts as edited (NEW ALL keeps it, NEW DRUMS rolls)
+    void takeDrumEdits()
+    {
+        genralink::LinkData* L = link_.data();
+        if (!L) return;
+        uint32_t w = L->editW.load(std::memory_order_acquire);
+        if (!editRSet_) { editR_ = w; editRSet_ = true; return; } // edits from before this plugin started: not ours
+        if (w == editR_) return;
+        if (w - editR_ > (uint32_t)genralink::LinkData::kEdits) editR_ = w - genralink::LinkData::kEdits;
+        undoPat_ = pat_;
+        hasUndo_ = true;
+        for (; editR_ != w; ++editR_)
+        {
+            int c = L->editCmd[editR_ % genralink::LinkData::kEdits].load(std::memory_order_relaxed);
+            int v = c & 15, st = (c >> 4) & 255;
+            bool on = (c >> 12) & 1;
+            if (v >= hh::DRUMS || st >= kSteps) continue;
+            hh::Hit& h = pat_.drum[v][st];
+            if (on) { h = hh::Hit(); h.vel = 0.85f; h.prio = 0.f; }
+            else h.vel = 0.f;
+        }
+        pat_.edited[hh::T_DRUMS] = true;
+        publishLoop(true);
+        screen_.message(P_STATUS, "SCHLAG: drum step edited (NEW DRUMS rolls again)", 3000);
+    }
+
     // REC (worker): the pad hits go into the chop lane, on the nearest 16th, overdubbing pass by pass
     void takeRecorded()
     {
@@ -1585,6 +1614,7 @@ private:
             }
             handleTaps();
             takeRecorded();
+            takeDrumEdits();
             if (bankReset_.exchange(false)) { notifyHostParameterChanged(P_BANK); requestDisplayUpdate(); }
             if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "learned and saved", 3000);
 
@@ -1630,7 +1660,9 @@ private:
     // audio thread
     hh::ChopSet* cur_ = nullptr;
     Seq* seq_ = nullptr;
-    std::atomic<bool> stateLoaded_{false}, hostCycling_{false}, hostPlaying_{false};
+    std::atomic<bool> stateLoaded_{false}, hostCycling_{false}, hostPlaying_{false}, swapNow_{false};
+    uint32_t editR_ = 0;
+    bool editRSet_ = false;
     long loopLen_ = 64, loopStart_ = 0;           // audio thread
     std::atomic<int> loopLenShown_{64}, recState_{0};
     std::atomic<long> loopStartShown_{0};
