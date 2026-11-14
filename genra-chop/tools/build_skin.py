@@ -587,7 +587,7 @@ def chop_setup(p):
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
                 "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE"]
-DEAD_VOICES = {2: 3, 6: 4}  # CLAP and TOM: dying displays (value: the damage pattern)
+DEAD_VOICES = {6: 4}  # TOM: a dying display (value: the damage pattern)
 
 
 class SchlagPage(Page):
@@ -628,8 +628,13 @@ def schlag_main(p):
         for j in range(16):
             p.film(cells, 3, "ZELLE %d %d" % (v + 1, j + 1), "%d 215 6 18" % (x + 11 + int(round(j * 7.9))))
         p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 244 72 72" % (x + 36), ring)
-        p.lcd("%d 322 89 26" % (x + 28), dead)
-        p.value("RANDOM %s" % VOICE_NAMES[v], "%d 322 89 26" % (x + 28), 16.0, ink, CENTRED)
+        p.lcd("%d 322 62 26" % (x + 8), dead)
+        p.value("RANDOM %s" % VOICE_NAMES[v], "%d 322 62 26" % (x + 8), 15.0, ink, CENTRED)
+        # HOLD | LIVE: grey = HOLD (the roll stays), red = LIVE (every pass rolls again); the text is the value
+        hb = "%d 322 62 26" % (x + 75)
+        p.film(img.state(1, 2, 62, 26), 2, "LIVE %s" % VOICE_NAMES[v], hb)
+        p.value("LIVE %s" % VOICE_NAMES[v], hb, 15.0, L_WHITE, CENTRED)
+        p.button("LIVE %s" % VOICE_NAMES[v], hb, 1, 1)
         # two function slots: the name field (tap = next function), a bigger knob, its value beside it
         for k in range(2):
             y = 358 + k * 96

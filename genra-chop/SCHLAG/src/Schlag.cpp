@@ -59,7 +59,7 @@ static const char* const kCaptions[][2] = {
     {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"}, {"root", "ROOT HERE"},
     {"hint1", "1st tap = listen"}, {"hint2", "2nd tap = the voice's sample"}, {"print", "PRINT"},
     {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
-    {"padsinfo", "PADS: only the MPC track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
+    {"padsinfo", "PADS: only the track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
     {"help2", "pads 1 to 16 in order"}, {"help3", "(pad 1 = bottom left)"},
     {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
     {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
@@ -78,8 +78,9 @@ enum
     P_VAL0 = P_FUNC0 + kVoices * kSlots,  // v * kSlots + k: the slot's knob (the value of the function it shows)
     P_FV0 = P_VAL0 + kVoices * kSlots,    // v * NUM_FUNCS + f: every function's value (works shown or not)
     P_VOLUME = P_FV0 + kVoices * NUM_FUNCS, P_AUTO, P_CHOKE, P_VOICE, P_KITNOTES,
+    P_LIVE0,                              // per voice: RANDOM HOLD (0) or LIVE (1)
     // buttons
-    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, // flashes 0..12
+    P_NEW = P_LIVE0 + kVoices, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, // flashes 0..12
     P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
@@ -190,6 +191,7 @@ public:
         addParam(boolParam("choke", "HAT CHOKE", true));
         addParam(choiceParam("voice", "VOICE", {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"}, 0));
         addParam(boolParam("kitnotes", "MPC KIT NOTES", false));
+        for (int v = 0; v < kVoices; ++v) addParam(boolParam(("live" + std::to_string(v + 1)).c_str(), ("LIVE " + std::string(kVoiceNames[v])).c_str(), false));
         for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
@@ -223,7 +225,7 @@ public:
         for (int i = P_FUNCTAP0; i < P_ROWTAP0 + kRows; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "SCHLAG 0.5 · LINK v3");
+        screen_.setText(P_VERSION, "SCHLAG 0.6 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -232,6 +234,12 @@ public:
             for (auto& r : retired_[v]) r.store(nullptr);
             seed_[v].store(1u + (uint32_t)v * 97u);
             swapped_[v].store(0);
+            holdRound_[v].store(0);
+            lastRound_[v].store(0);
+            liveStable_[v].store(false);
+            seenMask_[v].store(0);
+            seenLoad_[v].store(0);
+            seenLoadReq_[v].store(false);
         }
         preview_.store(nullptr);
         for (auto& r : previewRetired_) r.store(nullptr);
@@ -259,7 +267,7 @@ public:
         i.name = "SCHLAG";
         i.vendor = "Genra";
         i.uniqueId = MPC_FOURCC('G', 'n', 'S', 'g');
-        i.version = 500;
+        i.version = 600;
         i.isInstrument = true;
         i.numInputs = 0;
         i.numOutputs = 2;
@@ -317,6 +325,19 @@ public:
         long len = L ? (long)L->loopSteps.load(std::memory_order_relaxed) : 0;
         const long start = L && len >= 4 && len <= 1024 ? (long)L->loopStart.load(std::memory_order_relaxed) : 0;
         if (len < 4 || len > 1024) len = kSteps;
+        // RANDOM: the positions that count (the loop's hits, the track's notes of this and the last pass)
+        autoNow_ = getInt(P_AUTO) == 0;
+        for (int v = 0; v < kVoices; ++v)
+        {
+            uint64_t m = 0;
+            if (loop) for (int st = 0; st < kSteps; ++st) if (loop->drum[v][st].vel) m |= 1ull << st;
+            loopMask_[v] = m;
+            if (seenLoadReq_[v].exchange(false, std::memory_order_acq_rel)) { seenPrev_[v] = seenLoad_[v].load(); seenCur_[v] = 0; }
+            seenMask_[v].store(seenCur_[v] | seenPrev_[v], std::memory_order_relaxed);
+        }
+        // the MPC jumps back at the end of its sequence: count the passes so LIVE rolls again on every one
+        if (playing0 && lastPpq_ >= 0.0 && tr0.ppqPos < lastPpq_ - 0.25) ++wraps_;
+        lastPpq_ = playing0 ? tr0.ppqPos : -1.0;
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -344,7 +365,7 @@ public:
                     int r = ready_.load(std::memory_order_acquire);
                     if (r >= 0 && r != cur_) { cur_ = r; inUse_.store(cur_, std::memory_order_release); loop = &loops_[cur_]; }
                 }
-                uint32_t round = (uint32_t)((n - pos) / len); // the pass of the loop
+                uint32_t round = (uint32_t)((n - pos) / len) + wraps_ * 7919u; // the pass of the loop
                 double base = (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0);
                 for (int v = 0; v < kVoices; ++v)
                 {
@@ -398,7 +419,24 @@ public:
                 if (pads_.learnNote(e.note())) continue;
                 // channel 10 (GENRA CHOP OUT, MPC drum notes) or MPC KIT NOTES: A01-A08 = the voices; else the pad map
                 int pad = (e.channel() == 9 || kitNotes) ? kitVoice(e.note()) : pads_.padOf(e.note());
-                if (pad >= 0 && pad < kVoices) trigger(pad, e.velocity() / 127.f, -1, 0);
+                if (pad < 0 || pad >= kVoices) continue;
+                // a note of the MPC track: its position (16th 0-63 in 4 bars) decides its sample, like a loop hit
+                int step = -1;
+                uint32_t round = 0;
+                if (playing)
+                {
+                    long q = (long)std::llround((tr.ppqPos + (double)i / (spStep * 4.0)) * 4.0);
+                    step = (int)(((q % kSteps) + kSteps) % kSteps);
+                    round = (uint32_t)((q - step) / kSteps) + wraps_ * 7919u;
+                    if (round != midiRound_[pad])
+                    {
+                        if (seenCur_[pad]) seenPrev_[pad] = seenCur_[pad];
+                        seenCur_[pad] = 0;
+                        midiRound_[pad] = round;
+                    }
+                    seenCur_[pad] |= 1ull << step;
+                }
+                trigger(pad, e.velocity() / 127.f, step, round);
             }
             for (int k = 0; k < nHits_;)
             {
@@ -449,8 +487,14 @@ public:
     void saveExtraState(std::vector<uint8_t>& out) override
     {
         std::lock_guard<std::mutex> g(mtx_);
-        std::string s = "SG1\n";
-        for (int v = 0; v < kVoices; ++v) s += voiceFolder_[v] + "\t" + voiceFile_[v] + "\n";
+        // SG2: per voice folder, file, then RANDOM's roll (seed, HOLD's pass, the track's note positions)
+        std::string s = "SG2\n";
+        for (int v = 0; v < kVoices; ++v)
+        {
+            char b[64];
+            std::snprintf(b, sizeof b, "\t%u\t%u\t%llx", seed_[v].load(), holdRound_[v].load(), (unsigned long long)seenMask_[v].load());
+            s += voiceFolder_[v] + "\t" + voiceFile_[v] + b + "\n";
+        }
         out.assign(s.begin(), s.end());
     }
 
@@ -458,25 +502,42 @@ public:
     {
         std::lock_guard<std::mutex> g(mtx_);
         std::string s(reinterpret_cast<const char*>(data), size);
-        if (s.compare(0, 4, "SG1\n") != 0) return;
+        const bool v2 = s.compare(0, 4, "SG2\n") == 0;
+        if (!v2 && s.compare(0, 4, "SG1\n") != 0) return;
         size_t pos = 4;
         for (int v = 0; v < kVoices && pos < s.size(); ++v)
         {
             size_t e = s.find('\n', pos);
             std::string line = s.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
             pos = e == std::string::npos ? s.size() : e + 1;
-            size_t t = line.find('\t');
-            voiceFolder_[v] = t == std::string::npos ? line : line.substr(0, t);
-            voiceFile_[v] = t == std::string::npos ? std::string() : line.substr(t + 1);
+            std::vector<std::string> f;
+            for (size_t a = 0;;)
+            {
+                size_t t = line.find('\t', a);
+                f.push_back(line.substr(a, t == std::string::npos ? std::string::npos : t - a));
+                if (t == std::string::npos) break;
+                a = t + 1;
+            }
+            voiceFolder_[v] = f[0];
+            voiceFile_[v] = f.size() > 1 ? f[1] : std::string();
+            if (v2 && f.size() >= 5)
+            {
+                seed_[v].store((uint32_t)std::strtoul(f[2].c_str(), nullptr, 10));
+                holdRound_[v].store((uint32_t)std::strtoul(f[3].c_str(), nullptr, 10));
+                seenLoad_[v].store((uint64_t)std::strtoull(f[4].c_str(), nullptr, 16));
+                seenLoadReq_[v].store(true);
+            }
             loadReq_[v] = true;
         }
         resyncReq_.store(true);
+        randomSync_.store(true);
     }
 
     bool formatValue(int index, float plain, std::string& out) override
     {
         char b[32];
         if (index >= P_RANDOM0 && index < P_RANDOM0 + kVoices) { std::snprintf(b, sizeof b, "%.0f %%", plain); out = b; return true; }
+        if (index >= P_LIVE0 && index < P_LIVE0 + kVoices) { out = plain >= 0.5f ? "LIVE" : "HOLD"; return true; }
         if (index >= P_LEVEL0 && index < P_LEVEL0 + kVoices) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
         if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots)
         {
@@ -558,27 +619,49 @@ private:
     // REPEAT: hits per step (aus, 1/32 = 2, 1/48 = 3, 1/64 = 4)
     int repeatOf(int v) const { return repeatIndex(funcValue(v, F_REPEAT, 0.f)) + 1; }
 
-    // the sample a hit plays: the base one, or (RANDOM) another one from the folder
-    int pickSample(int v, const Kit& k, int step, uint32_t round) const
+    // the sample a hit plays: the base one, or (RANDOM) another one from the folder.
+    // RANDOM = the share of the voice's hits (positions 0-63 in 4 bars) that swap: exactly round(pct * hits) of them,
+    // the ones with the lowest roll. HOLD keeps the roll (it changes only when RANDOM moves); LIVE rolls every pass.
+    static uint32_t mix(uint32_t h) { h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15; return h; }
+    uint32_t rollOf(int v, int pos, uint32_t seed, uint32_t r) const
+    {
+        return mix((uint32_t)pos * 2654435761u ^ seed * 40503u ^ (uint32_t)v * 9176u ^ r * 0x9e3779b9u);
+    }
+    int pickSample(int v, const Kit& k, int step, uint32_t round, uint64_t mask) const
     {
         int n = (int)k.samples.size();
         if (n <= 1 || step < 0) return k.base;
         float pct = get(P_RANDOM0 + v) / 100.f;
         if (pct <= 0.f) return k.base;
-        uint32_t seed = seed_[v].load(std::memory_order_relaxed);
-        // a new roll on every pass of the loop (round), like the random sample of the Polyend Play
-        uint32_t h = (uint32_t)step * 2654435761u ^ seed * 40503u ^ (uint32_t)v * 9176u ^ round * 0x9e3779b9u;
-        h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
-        if ((h & 0xffff) / 65535.f >= pct) return k.base;
-        int alt = (int)((h >> 16) % (uint32_t)(n - 1));
+        step &= kSteps - 1;
+        mask |= 1ull << step;
+        const uint32_t seed = seed_[v].load(std::memory_order_relaxed);
+        const uint32_t r = liveStable_[v].load(std::memory_order_relaxed) ? round : holdRound_[v].load(std::memory_order_relaxed);
+        const int total = __builtin_popcountll(mask);
+        const int count = std::min(total, (int)std::lround(pct * (float)total));
+        if (count <= 0) return k.base;
+        const uint32_t mine = rollOf(v, step, seed, r);
+        int below = 0;
+        for (uint64_t m = mask & ~(1ull << step); m; m &= m - 1)
+        {
+            int p = __builtin_ctzll(m);
+            uint32_t o = rollOf(v, p, seed, r);
+            if (o < mine || (o == mine && p < step)) ++below;
+        }
+        if (below >= count) return k.base;
+        int alt = (int)(mix(mine ^ 0x85ebca6bu) % (uint32_t)(n - 1));
         return alt >= k.base ? alt + 1 : alt;
     }
+
+    // the voice's positions that count for RANDOM: the loop's hits (AUTO) and the positions of the track's notes
+    uint64_t hitMask(int v) const { return (autoNow_ ? loopMask_[v] : 0ull) | seenCur_[v] | seenPrev_[v]; }
 
     void trigger(int v, float vel, int step, uint32_t round)
     {
         Kit* k = kit_[v].load(std::memory_order_acquire);
         if (!k || k->samples.empty()) return;
-        int si = pickSample(v, *k, step, round);
+        int si = pickSample(v, *k, step, round, hitMask(v));
+        if (step >= 0) lastRound_[v].store(liveStable_[v].load(std::memory_order_relaxed) ? round : holdRound_[v].load(std::memory_order_relaxed), std::memory_order_relaxed);
         const Sample& s = k->samples[(size_t)clamp(si, 0, (int)k->samples.size() - 1)];
         if (!s.frames()) return;
         // the voice's other player fades out (a drum cuts itself); the closed hat cuts the open hat
@@ -956,7 +1039,7 @@ private:
         for (int r = 0; r < kRows; ++r) screen_.setText(P_ROWT0 + r, browser_.rowText(r, loaded, previewPath_));
         std::snprintf(b, sizeof b, "Drums · 4 bars · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the track's notes");
         screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "learned" : "not learned yet"));
         screen_.setText(P_MAPINFO, pads_.info());
         screen_.setText(P_ROOTTXT, root_.empty() ? std::string("none yet (FOLDER: ROOT HERE)") : pathLabel(root_), true);
@@ -978,16 +1061,20 @@ private:
         for (int v = 0; v < kVoices; ++v)
         {
             uint64_t sw = swapped_[v].load();
+            const bool autoMode = getInt(P_AUTO) == 0;
+            uint64_t loopHits = 0;
+            if (autoMode) for (int st = 0; st < kSteps; ++st) if (l.drum[v][st].vel) loopHits |= 1ull << st;
+            const uint64_t mask = loopHits | seenMask_[v].load();
             for (int j = 0; j < 16; ++j)
             {
                 int s = bar * 16 + j;
-                bool hit = l.drum[v][s].vel > 0;
+                bool hit = (mask >> s) & 1u;
                 bool rnd = hit && (sw >> s & 1u);
-                // without the loop playing: which hits would swap (the same roll the audio thread uses)
-                if (hit && step < 0)
+                // HOLD, or the loop not playing: which hits swap (the same roll the audio thread uses)
+                if (hit && (step < 0 || !liveStable_[v].load()))
                 {
                     Kit* k = kit_[v].load();
-                    if (k && k->samples.size() > 1) rnd = pickSample(v, *k, s, 0) != k->base;
+                    rnd = k && k->samples.size() > 1 && pickSample(v, *k, s, lastRound_[v].load(), mask) != k->base;
                 }
                 screen_.setFrame(P_CELL0 + v * 16 + j, hit ? (rnd ? 2 : 1) : 0);
             }
@@ -1055,8 +1142,16 @@ private:
         genralink::Link::clearLoop(loop_);
         genralink::Link::Alive alive;
         int lastVoice = -1;
-        float lastRandom[kVoices];
-        for (int v = 0; v < kVoices; ++v) lastRandom[v] = get(P_RANDOM0 + v);
+        // RANDOM and HOLD | LIVE count only when steady for 40 ms (the MPC probes values for a moment)
+        float lastRandom[kVoices], pendRandom[kVoices];
+        long long pendRandomAt[kVoices], pendLiveAt[kVoices];
+        bool pendLive[kVoices];
+        for (int v = 0; v < kVoices; ++v)
+        {
+            lastRandom[v] = pendRandom[v] = get(P_RANDOM0 + v);
+            pendRandomAt[v] = pendLiveAt[v] = 0;
+            pendLive[v] = liveStable_[v].load();
+        }
         long long lastSlow = 0;
         while (!quit_.load())
         {
@@ -1087,11 +1182,34 @@ private:
                     for (auto& s : swapped_) s.store(0);
                 }
             }
-            // RANDOM: every turn rolls again
+            // RANDOM: every turn rolls again (HOLD keeps that roll); LIVE -> HOLD keeps the last pass
+            const long long now = nowMs();
+            if (randomSync_.exchange(false))
+                for (int v = 0; v < kVoices; ++v) { lastRandom[v] = pendRandom[v] = get(P_RANDOM0 + v); pendRandomAt[v] = 0; }
             for (int v = 0; v < kVoices; ++v)
             {
                 float r = get(P_RANDOM0 + v);
-                if (std::fabs(r - lastRandom[v]) > 0.4f) { lastRandom[v] = r; seed_[v].fetch_add(1); swapped_[v].store(0); }
+                if (std::fabs(r - lastRandom[v]) <= 0.4f) { pendRandom[v] = lastRandom[v]; pendRandomAt[v] = 0; }
+                else if (std::fabs(r - pendRandom[v]) > 0.01f || !pendRandomAt[v]) { pendRandom[v] = r; pendRandomAt[v] = now; }
+                else if (now - pendRandomAt[v] >= 40)
+                {
+                    lastRandom[v] = r;
+                    pendRandomAt[v] = 0;
+                    seed_[v].fetch_add(1);
+                    swapped_[v].store(0);
+                    Kit* k = kit_[v].load();
+                    if (r > 0.5f && k && k->samples.size() <= 1) screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": RANDOM: 1 sample in folder");
+                }
+                bool live = getBool(P_LIVE0 + v);
+                if (live == liveStable_[v].load()) { pendLive[v] = live; pendLiveAt[v] = 0; }
+                else if (live != pendLive[v] || !pendLiveAt[v]) { pendLive[v] = live; pendLiveAt[v] = now; }
+                else if (now - pendLiveAt[v] >= 40)
+                {
+                    if (!live) holdRound_[v].store(lastRound_[v].load());
+                    liveStable_[v].store(live);
+                    pendLiveAt[v] = 0;
+                    swapped_[v].store(0);
+                }
             }
             for (auto& t : screen_.taps())
             {
@@ -1180,7 +1298,7 @@ private:
     Browser browser_;
     bool started_ = false;
     std::thread worker_;
-    std::atomic<bool> quit_{false}, resyncReq_{false};
+    std::atomic<bool> quit_{false}, resyncReq_{false}, randomSync_{false};
     // audio thread
     Player players_[kVoices][2];
     Hit hits_[64];
@@ -1204,6 +1322,15 @@ private:
     int shownFunc_[kVoices * kSlots];
     float shownVal_[kVoices * kSlots] = {};
     int cur_ = -1; // audio thread: the loop that plays (index into loops_)
+    // RANDOM (audio thread): the loop's hit positions, the track's note positions, the passes of the MPC sequence
+    bool autoNow_ = true;
+    uint64_t loopMask_[kVoices] = {}, seenCur_[kVoices] = {}, seenPrev_[kVoices] = {};
+    uint32_t midiRound_[kVoices] = {}, wraps_ = 0;
+    double lastPpq_ = -1.0;
+    // RANDOM (shared): HOLD's roll, the last roll played, HOLD | LIVE as the worker saw it steady, positions for the state
+    std::atomic<uint32_t> holdRound_[kVoices], lastRound_[kVoices];
+    std::atomic<bool> liveStable_[kVoices], seenLoadReq_[kVoices];
+    std::atomic<uint64_t> seenMask_[kVoices], seenLoad_[kVoices];
     // worker
     genralink::Loop loop_;
     KitInfo kitInfo_[kVoices];
