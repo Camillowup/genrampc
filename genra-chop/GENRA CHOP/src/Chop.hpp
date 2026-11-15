@@ -65,6 +65,11 @@ void warpBeats(const ChopSet& src, double ratio, SampleData& out);
 void copyAnalysis(const ChopSet& from, ChopSet& to);
 /** A warped set from the original and the new audio (ratio = new length / old length). */
 void makeWarped(const ChopSet& orig, SampleData&& audio, double ratio, int how, ChopSet& out);
+/** Cut again at these points (frames, in the set's own audio; sorted, at most PADS) and analyse the chops anew (tones,
+ *  chords, key, break voices); the audio, the tempo and the waveform stay. */
+void recut(ChopSet& cs, std::vector<size_t> starts);
+/** The quietest point within 5 ms of `at` (a cut there does not click). */
+size_t nearZero(const SampleData& d, size_t at);
 /** The waveform for the display. */
 void computePeaks(ChopSet& cs);
 /** The chords and the key again (after the cut is the same but e.g. nothing else changed): part of analyse(). */

@@ -1,7 +1,7 @@
 {
   "name": "GENRA CHOP",
   "manufacturer": "Genra",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "format": "vst2",
   "kind": "instrument",
   "uid": "GnCh",

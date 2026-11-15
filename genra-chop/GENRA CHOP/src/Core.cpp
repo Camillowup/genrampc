@@ -15,7 +15,6 @@ const char* const NOTE_NAMES[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "
 const char* const BASS_MODES[4] = {"FOLLOW", "ROOT+5", "WALK", "808"};
 const char* const MEL_MODES[4] = {"STAB", "LEAD", "ARP", "RIFF"};
 const char* const PAD_MODES[3] = {"SUSTAIN", "STAB", "SWELL"};
-const char* const DRUM_MODES[3] = {"KIT", "BREAK", "BOTH"};
 
 static const int SCALES[NUM_SCALES][7] = {
 	{0, 2, 3, 5, 7, 8, 10}, {0, 2, 3, 5, 7, 9, 10}, {0, 2, 4, 5, 7, 9, 11}, {0, 1, 3, 5, 7, 8, 10}, {0, 2, 3, 5, 7, 8, 11},
@@ -174,9 +173,25 @@ static void genDrums(Pattern& p, const Style& st, Rng& rng) {
 	for (int k : KICK_EXTRA)
 		if (A[KICK][k].vel == 0.f && rng.chance(0.4f))
 			A[KICK][k].vel = rng.range(0.5f, 0.75f), A[KICK][k].prio = rng.range(0.6f, 0.9f);
-	for (int i = 1; i < STEPS; i += 2)
-		if (A[CH][i].vel == 0.f && A[CH][i - 1].vel > 0.f && rng.chance(0.6f))
-			A[CH][i].vel = rng.range(0.25f, 0.4f), A[CH][i].prio = rng.range(0.7f, 0.95f);
+	// hats come early with DENS (from about 30-40 %): boom bap gets quiet ghost hats between the eighths, trap
+	// gets its 16ths sooner; a style with hats only on the quarters gets the missing eighths first
+	{
+		bool trapH = st.hatRoll > 0.f || st.bass == BM_808;
+		bool anyCH = false;
+		for (int i = 0; i < STEPS; i++)
+			anyCH = anyCH || A[CH][i].vel > 0.f;
+		if (anyCH)
+			for (int i = 0; i < STEPS; i += 2)
+				if (A[CH][i].vel == 0.f && rng.chance(0.7f))
+					A[CH][i].vel = rng.range(0.4f, 0.55f), A[CH][i].prio = rng.range(0.28f, 0.38f);
+		for (int i = 1; i < STEPS; i += 2)
+			if (A[CH][i].vel == 0.f && A[CH][i - 1].vel > 0.f && rng.chance(0.8f)) {
+				if (trapH)
+					A[CH][i].vel = rng.range(0.32f, 0.48f), A[CH][i].prio = rng.range(0.3f, 0.45f);
+				else
+					A[CH][i].vel = rng.range(0.18f, 0.3f), A[CH][i].prio = rng.range(0.32f, 0.48f);
+			}
+	}
 	if (A[OH][14].vel == 0.f && rng.chance(0.5f))
 		A[OH][14].vel = 0.6f, A[OH][14].prio = 0.75f;
 	if (A[SNARE][4].vel > 0.f || A[SNARE][8].vel > 0.f) {
@@ -210,15 +225,18 @@ static void genDrums(Pattern& p, const Style& st, Rng& rng) {
 			if (trap) {
 				static const int TP[] = {3, 7, 10, 13};
 				for (int i : TP)
-					if (rng.chance(0.5f))
-						add(PERC, i, rng.range(0.4f, 0.6f), rng.range(0.55f, 0.85f));
+					if (rng.chance(0.4f))
+						add(PERC, i, rng.range(0.3f, 0.45f), rng.range(0.76f, 0.9f));
 			}
 			else {
-				for (int i = 2; i < STEPS; i += 4)
-					add(PERC, i, rng.range(0.25f, 0.4f), rng.range(0.6f, 0.85f)); // tambourine on the off-beats
-				if (rng.chance(0.5f))
+				// tambourine: rarer, quieter, only from about 75 % DENS
+				static const int TB[] = {6, 14};
+				for (int i : TB)
+					if (rng.chance(0.6f))
+						add(PERC, i, rng.range(0.15f, 0.25f), rng.range(0.76f, 0.9f));
+				if (rng.chance(0.35f))
 					for (int i = 0; i < STEPS; i += 2)
-						add(PERC, i, 0.18f, 0.92f); // a shaker on the eighths, last of all
+						add(PERC, i, 0.12f, 0.94f); // a shaker on the eighths, last of all
 			}
 		}
 		if (funk || trap) {
@@ -227,10 +245,15 @@ static void genDrums(Pattern& p, const Style& st, Rng& rng) {
 				if (rng.chance(0.5f))
 					add(OH, i, rng.range(0.45f, 0.65f), rng.range(0.6f, 0.85f));
 		}
-		if (empty(CLAP) && rng.chance(trap || funk ? 0.8f : 0.4f))
-			for (int i = 0; i < STEPS; i++)
-				if (A[SNARE][i].vel > 0.f && A[SNARE][i].prio <= 0.1f)
-					add(CLAP, i, rng.range(0.5f, 0.7f), rng.range(0.7f, 0.9f));
+	}
+	// the clap layer is no longer in the bar template: it comes only now and then (bars 2 and 4, before the fill)
+	// and only with high DENS (from about 80 %); styles with their own clap keep it
+	bool clapLayer = true;
+	for (int i = 0; i < STEPS; i++)
+		clapLayer = clapLayer && A[CLAP][i].vel == 0.f;
+	{
+		bool trapC = st.hatRoll > 0.f || st.bass == BM_808, funkC = st.bass == BM_FUNK;
+		clapLayer = clapLayer && rng.chance(trapC || funkC ? 0.7f : 0.6f);
 	}
 	// the four bars: A A A A+fill (bar 2 a little different)
 	for (int b = 0; b < BARS; b++)
@@ -249,8 +272,8 @@ static void genDrums(Pattern& p, const Style& st, Rng& rng) {
 							h.off += st.dilla * rng.range(-0.25f, 0.25f);
 					}
 					h.off = std::max(-0.45f, std::min(0.45f, h.off));
-					if (v == CH && st.hatRoll > 0.f && rng.chance(st.hatRoll * (b == 3 ? 0.6f : 0.3f)))
-						h.ratchet = (uint8_t) (2 + rng.below(3)), h.prio = std::min(h.prio, 0.35f);
+					if (v == CH && st.hatRoll > 0.f && rng.chance(st.hatRoll * (b == 3 ? 0.7f : 0.38f)))
+						h.ratchet = (uint8_t) (2 + rng.below(3)), h.prio = std::min(h.prio, 0.3f);
 				}
 				p.drum[v][b * STEPS + i] = h;
 			}
@@ -294,6 +317,34 @@ static void genDrums(Pattern& p, const Style& st, Rng& rng) {
 					Hit& t = p.drum[TOM][b4 + i];
 					t.vel = rng.range(0.5f, 0.8f), t.prio = 0.85f, t.off = 0.f;
 				}
+	}
+	// the clap layer: on the last main snare of bar 2 and / or bar 4
+	if (clapLayer) {
+		for (int b = 1; b < BARS; b += 2) {
+			if (!rng.chance(b == 3 ? 0.8f : 0.6f))
+				continue;
+			int last = -1;
+			for (int i = 0; i < STEPS; i++) {
+				const Hit& sn = p.drum[SNARE][b * STEPS + i];
+				if (sn.vel > 0.f && sn.prio <= 0.1f)
+					last = i;
+			}
+			if (last >= 0) {
+				Hit& c = p.drum[CLAP][b * STEPS + last];
+				if (c.vel == 0.f) {
+					c = p.drum[SNARE][b * STEPS + last];
+					c.vel = rng.range(0.5f, 0.7f);
+					c.prio = rng.range(0.8f, 0.95f);
+					c.ratchet = 1;
+				}
+			}
+		}
+	}
+	// an open hat into bar 1 (end of bar 4), more often and earlier with DENS
+	if (rng.chance(0.75f)) {
+		Hit& o = p.drum[OH][b4 + 14];
+		if (o.vel == 0.f)
+			o.vel = rng.range(0.5f, 0.65f), o.prio = rng.range(0.38f, 0.5f), o.off = 0.f;
 	}
 	// a crash-ish open hat at the top of bar 1 (in the next cycle) now and then
 	if (rng.chance(0.3f))
@@ -709,7 +760,74 @@ static void genPad(Pattern& p, const Style& st, const Settings& set, const Sampl
 	(void) st;
 }
 
-// ---------------------------------------------------------------- the chops
+// ---------------------------------------------------------------- the chops (2.7.0: kinds of pattern, rhythms by style)
+const char* const CHOP_PAT_NAMES[NUM_CHOP_PATS] = {"AUTO", "ORDER", "STABS", "CALL+RESP", "HOLD", "MELODY", "HALF ORIG", "SPARSE"};
+const char* const CHOP_PAT_TEXT[NUM_CHOP_PATS] = {
+	"AUTO (the style chooses)",
+	"ORDER (the chops as in the sample)",
+	"STABS (short hits on a rhythm)",
+	"CALL+RESP (bars 1, 3 call, bars 2, 4 answer)",
+	"HOLD (a few long chops, a chord per bar)",
+	"MELODY (one chop played up and down the key)",
+	"HALF ORIG (one bar as in the sample, one turned round)",
+	"SPARSE (one or two chops a bar, room for the voice)",
+};
+
+// the styles by family: their own chop rhythms and which kinds AUTO likes
+enum Family { F_BOOMBAP, F_JAZZ, F_SOUL, F_DILLA, F_LOFI, F_FUNK, F_ELECTRO, F_TRAP, F_DRILL, NUM_FAMILIES };
+static int familyOf(int style) {
+	// by the order of the 29 styles in Styles.cpp
+	static const int FAM[NUM_STYLES] = {
+		F_ELECTRO, F_BOOMBAP, F_BOOMBAP, F_ELECTRO, F_FUNK,      // 80s: Electro, Old School, Golden Age, Miami, New Jack
+		F_BOOMBAP, F_JAZZ, F_BOOMBAP, F_FUNK, F_FUNK, F_TRAP, F_TRAP, // 90s: East Coast, Jazz Rap, Dark NY, G-Funk, West Coast, Memphis, Dirty South
+		F_SOUL, F_DILLA, F_FUNK, F_ELECTRO, F_JAZZ, F_ELECTRO,   // 2000s: Soul Chop, Dilla, Neptunes, Crunk, Abstract, Snap
+		F_TRAP, F_DRILL, F_DRILL, F_TRAP, F_LOFI, F_ELECTRO, F_BOOMBAP, // 2010s: Trap, Chicago Drill, UK Drill, Cloud, Lo-Fi, Ratchet, Grimy
+		F_LOFI, F_TRAP, F_TRAP, F_TRAP,                          // 2020s: Drumless, Rage, Plugg, Drift Phonk
+	};
+	return FAM[std::max(0, std::min(NUM_STYLES - 1, style))];
+}
+// four or five one-bar rhythms per family (x: a chop starts)
+static const char* const RHYTHMS[NUM_FAMILIES][5] = {
+	{"x..x..x...x.x...", "x.....x...x..x..", "..x...x..x....x.", "x..x....x..x....", "x...x..x.x...x.."}, // boom bap: off the beat
+	{"x.....x.....x...", "x..x.....x..x...", "...x..x....x..x.", "x.......x..x.x..", "x.....x..x......"}, // jazz: lazy, wide
+	{"x.x..x.xx.x..x.x", "x..xx..x.x.xx...", "x.x.x..x..x.x.x.", "xx..x.x.xx..x.x.", "x.xx.x..x.xx.x.."}, // soul chop: quick changes
+	{"x..x.x....x..x..", ".x..x..x.x...x..", "x...x.x..x.x....", "x..x..x.x.....x.", "..x.x...x..x.x.."}, // dilla: in between
+	{"x.......x.......", "x.....x.........", "x.........x.....", "x...........x...", "x.......x...x..."}, // lo-fi: calm
+	{"x..x..x.x.x..x.x", "x.xx..x...x.xx..", "..x.x..xx..x..x.", "x..x.x..x.xx...x", "x.x..x.x..x.x..x"}, // funk: 16th syncopation
+	{"x.x.x.x.x.x.x.x.", "x..x..x..x..x.x.", "xx..xx..xx..x.x.", "x...x.x...x.x.x.", "x..x..x.x..x..x."}, // electro / crunk: straight
+	{"x.......x.....x.", "x.........x.....", "x.....x.......x.", "x..........x..x.", "x.......x......."}, // trap: sparse, long
+	{"x..x..x...x..x..", "x.....x..x....x.", "..x..x..x.....x.", "x..x....x..x..x.", "x..x..x.....x..."}, // drill: 3-3-2
+};
+// how much AUTO likes each kind (ORDER .. SPARSE); ORDER also grows with the style's own chopLoop
+static const float KIND_W[NUM_FAMILIES][NUM_CHOP_PATS - 1] = {
+	{1.f, 4.f, 3.f, 1.f, 1.f, 2.f, 1.f}, // boom bap
+	{2.f, 2.f, 2.f, 3.f, 1.f, 2.f, 1.f}, // jazz
+	{1.f, 4.f, 3.f, .5f, 3.f, 2.f, .5f}, // soul chop
+	{1.f, 3.f, 2.f, 1.f, 2.f, 3.f, 1.f}, // dilla
+	{2.f, 1.f, 1.f, 4.f, 1.f, 2.f, 3.f}, // lo-fi
+	{1.f, 4.f, 3.f, 1.f, 2.f, 1.f, 1.f}, // funk
+	{.5f, 4.f, 2.f, 1.f, 3.f, 1.f, 2.f}, // electro
+	{.5f, 1.f, 1.f, 4.f, 3.f, 1.f, 4.f}, // trap
+	{.5f, 2.f, 2.f, 3.f, 3.f, 1.f, 3.f}, // drill
+};
+
+int autoChopPat(int style, float r) {
+	int f = familyOf(style);
+	const Style& st = STYLES[std::max(0, std::min(NUM_STYLES - 1, style))];
+	float w[NUM_CHOP_PATS - 1], sum = 0.f;
+	for (int k = 0; k < NUM_CHOP_PATS - 1; k++) {
+		w[k] = KIND_W[f][k] + (k == 0 ? 3.f * st.chopLoop : 0.f);
+		sum += w[k];
+	}
+	float x = r * sum;
+	for (int k = 0; k < NUM_CHOP_PATS - 1; k++) {
+		if (x < w[k])
+			return k + 1;
+		x -= w[k];
+	}
+	return CP_STABS;
+}
+
 static float chopSteps(const SampleInfo& si, int pad, float bpm) {
 	float stepSec = 60.f / std::max(30.f, bpm) / 4.f;
 	return si.chop[pad].seconds / stepSec;
@@ -726,6 +844,128 @@ static void putChop(Pattern& p, int s, int pad, float len, int pitch, float prio
 	e.prio = prio;
 }
 
+/** How well pad `pad` (pitched by `semis`) fits chord `want`: 1 the same root, less for a tone of it, a little for a
+ *  hit without a chord. */
+static float fitOf(const SampleInfo& si, const PadSet* pads, int pad, int semis, const Chord& want) {
+	Chord c = padChord(si, pads, pad);
+	if (!c.valid())
+		return si.chop[pad].kind == 2 ? 0.35f : 0.25f;
+	int root = pcOf(c.root + semis + (pads ? pads[pad].pitch : 0));
+	bool minor = c.quality == Q_MIN || c.quality == Q_MIN7 || c.quality == Q_MIN9 || c.quality == Q_DIM;
+	bool wantMinor = want.quality == Q_MIN || want.quality == Q_MIN7 || want.quality == Q_MIN9 || want.quality == Q_DIM;
+	float conf = 0.6f + 0.4f * std::min(1.f, si.chop[pad].conf * 2.f);
+	if (root == pcOf(want.root))
+		return conf * (minor == wantMinor ? 1.f : 0.8f);
+	int t[5];
+	int n = chordTones(want, t);
+	for (int i = 0; i < n; i++)
+		if (pcOf(t[i]) == root)
+			return conf * 0.6f;
+	return 0.1f;
+}
+
+/** The semitones (-6..+5) that move pad's chord root onto `root` (0 for a hit). */
+static int pitchTo(const SampleInfo& si, const PadSet* pads, int pad, int root) {
+	Chord c = padChord(si, pads, pad);
+	if (!c.valid())
+		return 0;
+	int d = pcOf(root - (c.root + (pads ? pads[pad].pitch : 0)));
+	return d > 5 ? d - 12 : d;
+}
+
+/** The pads for a bar: the ones that fit its chord best (stabs with a clear chord before bare hits, 2.7.0), `n` of
+ *  them, a little shuffled; pitched onto the chord when the style pitches. */
+static int padsFor(const SampleInfo& si, const PadSet* pads, const Chord& want, int n, bool preferShort, bool mayPitch, Rng& rng,
+                   int* out, int* semis, int avoid = -1) {
+	struct C {
+		int pad, semis;
+		float score;
+	};
+	C c[PADS];
+	int nc = 0;
+	for (int i = 0; i < si.count; i++) {
+		if (i == avoid && si.count > 2)
+			continue;
+		float s0 = fitOf(si, pads, i, 0, want);
+		int sm = 0;
+		if (mayPitch) {
+			int d = pitchTo(si, pads, i, want.root);
+			float s1 = fitOf(si, pads, i, d, want) * 0.85f; // pitched a little less natural
+			if (s1 > s0)
+				s0 = s1, sm = d;
+		}
+		// the kind: stabs (short, with a chord) for STABS, sustained ones for HOLD; very short fragments last
+		const ChopInfo& ci = si.chop[i];
+		float k = 0.f;
+		if (preferShort)
+			k = ci.kind == 1 ? 0.25f : (ci.kind == 0 ? 0.1f : 0.f);
+		else
+			k = ci.kind == 0 ? 0.25f : (ci.kind == 1 ? 0.1f : 0.f);
+		if (ci.seconds < 0.06f)
+			k -= 0.4f;
+		c[nc++] = {i, sm, s0 + k + rng.range(0.f, 0.15f)};
+	}
+	std::sort(c, c + nc, [](const C& a, const C& b) { return a.score > b.score; });
+	int m = std::min(n, nc);
+	for (int i = 0; i < m; i++) {
+		out[i] = c[i].pad;
+		semis[i] = c[i].semis;
+	}
+	return m;
+}
+
+/** The chords the style wants per bar (its progression in the key): the chops follow them (2.7.0). */
+static void targetChords(const Style& st, const Settings& set, Chord* out) {
+	int scale = scaleFor(st, set.key);
+	int deg[BARS] = {1, 1, 1, 1};
+	sscanf(st.prog, "%d %d %d %d", &deg[0], &deg[1], &deg[2], &deg[3]);
+	for (int b = 0; b < BARS; b++)
+		out[b] = degreeChord(scale, set.key.root, deg[b], st.color);
+}
+
+/** ORDER: the chops as they sit in the sample, each as long as it is (no cut-short pieces), over one or two bars. */
+static void orderBars(Pattern& p, const SampleInfo& si, float bpm, int startPad, int fromBar, int nBars, bool loose, Rng& rng) {
+	int pos = 0, i = startPad, span = 0;
+	ChopEv A[2 * STEPS];
+	for (int k = 0; k < 2 * STEPS; k++)
+		A[k] = ChopEv();
+	while (pos < 2 * STEPS) {
+		float d = chopSteps(si, i, bpm);
+		int len = std::max(1, (int) std::lround(d));
+		if (loose && len > 1 && rng.chance(0.2f))
+			len = std::max(1, len / 2); // only the loose styles (Dilla & co) cut a piece short now and then
+		A[pos].pad = (int8_t) i;
+		A[pos].len = (float) std::min(len, 2 * STEPS - pos);
+		pos += len;
+		span = pos;
+		i = (i + 1) % si.count;
+		if (i == startPad && pos >= STEPS)
+			break;
+	}
+	int alen = span > STEPS ? 2 * STEPS : STEPS;
+	for (int s = fromBar * STEPS; s < (fromBar + nBars) * STEPS && s < LEN; s++) {
+		const ChopEv& e = A[(s - fromBar * STEPS) % alen];
+		if (e.pad >= 0)
+			putChop(p, s, e.pad, e.len, 0, 0.f);
+	}
+}
+
+/** A rhythm's hits on one bar, cycling through `n` pads; every chop lasts until the next one (at most as long as it is). */
+static void rhythmBar(Pattern& p, int bar, const char* rh, const int* set, const int* semis, int n, const SampleInfo& si, float bpm,
+                      const int* pitchOf, int& k) {
+	for (int i = 0; i < STEPS; i++) {
+		if (rh[i] != 'x')
+			continue;
+		int j = k++ % n;
+		int pad = set[j];
+		int nxt = i + 1;
+		while (nxt < STEPS && rh[nxt] != 'x')
+			nxt++;
+		float len = std::min((float) (nxt - i), std::max(1.f, chopSteps(si, pad, bpm)));
+		putChop(p, bar * STEPS + i, pad, len, semis[j] + (pitchOf ? pitchOf[i] : 0), i < 8 ? 0.f : 0.2f);
+	}
+}
+
 static void genChop(Pattern& p, const Style& st, const Settings& set, const SampleInfo& si, const PadSet* pads, Rng& rng,
                     float bpm) {
 	// keep the locked pads' events
@@ -739,76 +979,157 @@ static void genChop(Pattern& p, const Style& st, const Settings& set, const Samp
 	}
 	if (si.count <= 0)
 		return;
+	int style = (int) (&st - STYLES);
+	int fam = familyOf(style);
 	int scale = scaleFor(st, set.key);
-	bool loop = rng.uni() < st.chopLoop;
-	if (loop) {
-		// the sample in order (as it was played), over one or two bars: A1 A2 A1 A2' (or A A A A')
-		int start = si.count > 4 ? rng.below(std::min(4, si.count)) : 0;
-		int pos = 0, i = start;
-		int span = 0;
-		ChopEv A[2 * STEPS];
-		for (int k = 0; k < 2 * STEPS; k++)
-			A[k] = ChopEv();
-		while (pos < 2 * STEPS) {
-			float d = chopSteps(si, i, bpm);
-			int len = std::max(1, std::min(8, (int) std::lround(d)));
-			if (st.chopLoop < 0.9f && rng.chance(0.25f))
-				len = std::max(1, len / 2); // a cut-short chop now and then
-			A[pos].pad = (int8_t) i;
-			A[pos].len = (float) len;
-			A[pos].pitch = 0;
-			pos += len;
-			span = pos;
-			i = (i + 1) % si.count;
-			if (i == start && pos >= STEPS)
-				break;
-		}
-		int alen = span > STEPS ? 2 * STEPS : STEPS;
-		for (int s = 0; s < LEN; s++) {
-			const ChopEv& e = A[s % alen];
-			if (e.pad >= 0)
-				putChop(p, s, e.pad, e.len, 0, 0.f);
-		}
-	}
-	else {
-		// stabs: 2-5 chops (the short ones first), on a syncopated rhythm, pitched within the key
-		int cand[PADS], nc = 0;
-		for (int i = 0; i < si.count; i++)
-			cand[nc++] = i;
-		std::sort(cand, cand + nc, [&](int a, int b) {
-			float sa = si.chop[a].seconds + (si.chop[a].kind == 1 ? -10.f : 0.f);
-			float sb = si.chop[b].seconds + (si.chop[b].kind == 1 ? -10.f : 0.f);
-			return sa < sb;
-		});
-		int use = std::min(nc, 2 + rng.below(4));
-		int set5[5];
-		for (int i = 0; i < use; i++)
-			set5[i] = cand[std::min(nc - 1, i + rng.below(2))];
-		static const char* RH[] = {"x..x..x...x.x...", "x...x..x..x.x...", "x.x...x..x...x..", "..x..x...x..x.x.",
-		                           "x..x...x.x..x..."};
-		const char* rh = RH[rng.below(5)];
-		int k = 0;
-		int8_t pitchOf[STEPS];
-		for (int i = 0; i < STEPS; i++) {
-			pitchOf[i] = 0;
-			if (rh[i] == 'x' && rng.chance(st.chopPitch)) {
-				static const int DEG[] = {2, 4, -2, 3, 7, -3, 1};
-				pitchOf[i] = (int8_t) scaleStep(scale, DEG[rng.below(7)]);
-			}
-		}
-		for (int b = 0; b < BARS; b++)
-			for (int i = 0; i < STEPS; i++) {
-				if (rh[i] != 'x')
+	int kind = set.chopPat > CP_AUTO && set.chopPat < NUM_CHOP_PATS ? set.chopPat : autoChopPat(style, rng.uni());
+	Chord want[BARS];
+	targetChords(st, set, want);
+	bool loose = st.chopOff > 0.f;
+	bool mayPitch = rng.chance(std::min(1.f, st.chopPitch * 1.6f));
+	const char* const* RH = RHYTHMS[fam];
+	int startPad = si.count > 4 ? rng.below(std::min(4, si.count)) : 0;
+	switch (kind) {
+		case CP_ORDER: orderBars(p, si, bpm, startPad, 0, BARS, loose, rng); break;
+		case CP_HALF: {
+			// bars 1 and 3 as in the sample, bars 2 and 4 the same chops turned round (another order, same rhythm)
+			orderBars(p, si, bpm, startPad, 0, BARS, loose, rng);
+			for (int b = 1; b < BARS; b += 2) {
+				int idx[STEPS], n = 0;
+				for (int i = 0; i < STEPS; i++)
+					if (p.chop[b * STEPS + i].pad >= 0)
+						idx[n++] = b * STEPS + i;
+				if (n < 2)
 					continue;
-				int pad = set5[k++ % use];
-				int nxt = i + 1;
-				while (nxt < STEPS && rh[nxt] != 'x')
-					nxt++;
-				float len = std::min((float) (nxt - i), std::max(1.f, chopSteps(si, pad, bpm)));
-				putChop(p, b * STEPS + i, pad, len, pitchOf[i], i < 8 ? 0.f : 0.2f);
+				int pd[STEPS];
+				for (int i = 0; i < n; i++)
+					pd[i] = p.chop[idx[i]].pad;
+				int how = rng.below(3);
+				for (int i = 0; i < n; i++) {
+					int from = how == 0 ? n - 1 - i : (how == 1 ? (i + n / 2) % n : (i % 2 ? i - 1 : std::min(n - 1, i + 1)));
+					p.chop[idx[i]].pad = (int8_t) pd[from];
+					float d = chopSteps(si, pd[from], bpm);
+					int nxt = i + 1 < n ? idx[i + 1] : (b + 1) * STEPS;
+					p.chop[idx[i]].len = std::max(0.5f, std::min((float) (nxt - idx[i]), std::max(1.f, d)));
+				}
 			}
+			break;
+		}
+		case CP_STABS: {
+			// 2-4 pads per bar that fit its chord, on one of the family's rhythms (bar 2 sometimes another)
+			const char* rh = RH[rng.below(5)];
+			const char* rh2 = rng.chance(0.4f) ? RH[rng.below(5)] : rh;
+			int pitchOf[STEPS] = {};
+			for (int i = 0; i < STEPS; i++)
+				if (rh[i] == 'x' && rng.chance(st.chopPitch * 0.5f)) {
+					static const int DEG[] = {2, 4, -2, 3, 7, -3};
+					pitchOf[i] = scaleStep(scale, DEG[rng.below(6)]);
+				}
+			int k = 0;
+			for (int b = 0; b < BARS; b++) {
+				int ps[4], sm[4];
+				int n = padsFor(si, pads, want[b], 2 + rng.below(3), true, mayPitch, rng, ps, sm);
+				if (n <= 0)
+					continue;
+				rhythmBar(p, b, b % 2 ? rh2 : rh, ps, sm, n, si, bpm, pitchOf, k);
+			}
+			break;
+		}
+		case CP_CALL: {
+			// a call (bars 1, 3) and an answer (bars 2, 4) with other pads, mostly in the second half of the bar
+			const char* call = RH[rng.below(5)];
+			static const char* const RESP[] = {"........x..x.x..", "......x...x.x...", "........x.x...x.", "..........x.x.x.",
+			                                   "....x.......x.x."};
+			const char* resp = RESP[rng.below(5)];
+			int callPad = -1;
+			int k = 0;
+			for (int b = 0; b < BARS; b++) {
+				int ps[3], sm[3];
+				bool answer = b % 2 == 1;
+				int n = padsFor(si, pads, want[b], answer ? 2 : 3, true, mayPitch, rng, ps, sm, answer ? callPad : -1);
+				if (n <= 0)
+					continue;
+				if (!answer)
+					callPad = ps[0];
+				rhythmBar(p, b, answer ? resp : call, ps, sm, n, si, bpm, nullptr, k);
+			}
+			break;
+		}
+		case CP_HOLD: {
+			// one long chop per bar (or half a bar now and then): the chord of the bar
+			bool halves = rng.chance(0.35f);
+			for (int b = 0; b < BARS; b++) {
+				int ps[2], sm[2];
+				int n = padsFor(si, pads, want[b], 2, false, true, rng, ps, sm);
+				if (n <= 0)
+					continue;
+				if (halves) {
+					putChop(p, b * STEPS, ps[0], 8.f, sm[0], 0.f);
+					putChop(p, b * STEPS + 8, ps[n > 1 && rng.chance(0.5f) ? 1 : 0], 8.f, sm[n > 1 ? 1 : 0], 0.15f);
+				}
+				else
+					putChop(p, b * STEPS, ps[0], 16.f, sm[0], 0.f);
+			}
+			break;
+		}
+		case CP_MELODY: {
+			// one chop with a clear tone, played as a little tune in the key: a motif, bar 4 answers
+			int best = 0;
+			float bs = -1.f;
+			for (int i = 0; i < si.count; i++) {
+				const ChopInfo& ci = si.chop[i];
+				float s = (ci.chord.valid() ? ci.conf : 0.f) + (ci.kind == 1 ? 0.2f : 0.f) - (ci.seconds < 0.06f ? 1.f : 0.f) +
+				          rng.range(0.f, 0.1f);
+				if (s > bs)
+					bs = s, best = i;
+			}
+			Chord pc = padChord(si, pads, best);
+			int padRoot = pc.valid() ? pc.root + (pads ? pads[best].pitch : 0) : set.key.root;
+			const char* rh = RH[rng.below(5)];
+			static const int MOTIF[4][6] = {{0, 2, 4, 2, 0, -1}, {0, 4, 2, 5, 4, 2}, {4, 2, 0, -3, 0, 2}, {0, 0, 2, 4, 7, 4}};
+			const int* mo = MOTIF[rng.below(4)];
+			for (int b = 0; b < BARS; b++) {
+				int k = 0;
+				int shift = b == 3 ? (rng.chance(0.5f) ? 1 : -2) : 0; // bar 4 answers a step away
+				for (int i = 0; i < STEPS; i++) {
+					if (rh[i] != 'x')
+						continue;
+					int deg = mo[k++ % 6] + shift;
+					int target = set.key.root + scaleStep(scale, deg);
+					int d = target - padRoot;
+					while (d > 7)
+						d -= 12;
+					while (d < -9)
+						d += 12;
+					int nxt = i + 1;
+					while (nxt < STEPS && rh[nxt] != 'x')
+						nxt++;
+					float len = std::min((float) (nxt - i), std::max(1.f, chopSteps(si, best, bpm)));
+					putChop(p, b * STEPS + i, best, len, d, i < 8 ? 0.f : 0.2f);
+				}
+			}
+			break;
+		}
+		default: { // CP_SPARSE: one or two chops a bar, room for the voice
+			static const int AT[NUM_FAMILIES][2] = {{0, 10}, {0, 6}, {0, 8}, {1, 10}, {0, 8}, {0, 11}, {0, 8}, {0, 14}, {0, 9}};
+			for (int b = 0; b < BARS; b++) {
+				int ps[2], sm[2];
+				int n = padsFor(si, pads, want[b], 2, rng.chance(0.5f), mayPitch, rng, ps, sm);
+				if (n <= 0)
+					continue;
+				int a = AT[fam][0], c = AT[fam][1];
+				bool two = rng.chance(0.6f);
+				float l0 = std::min((float) (two ? c - a : STEPS - a), std::max(1.f, chopSteps(si, ps[0], bpm)));
+				putChop(p, b * STEPS + a, ps[0], l0, sm[0], 0.f);
+				if (two) {
+					int q = n > 1 ? 1 : 0;
+					putChop(p, b * STEPS + c, ps[q], std::min((float) (STEPS - c), std::max(1.f, chopSteps(si, ps[q], bpm))), sm[q], 0.3f);
+				}
+			}
+			break;
+		}
 	}
-	// the chipmunk, the drunk timing, cut-short ends
+	// the chipmunk, the drunk timing, now and then backwards
 	for (int s = 0; s < LEN; s++) {
 		ChopEv& e = p.chop[s];
 		if (e.pad < 0)
@@ -817,14 +1138,15 @@ static void genChop(Pattern& p, const Style& st, const Settings& set, const Samp
 		e.vel = rng.range(0.8f, 1.f);
 		if (st.chopOff > 0.f) {
 			e.off = rng.range(-1.f, 1.f) * st.chopOff * 0.35f;
-			e.len *= rng.range(0.6f, 1.f);
+			if (kind != CP_HOLD)
+				e.len *= rng.range(0.6f, 1.f);
 		}
-		if (rng.chance(st.chopRev * 0.25f))
+		if (kind != CP_HOLD && kind != CP_MELODY && rng.chance(st.chopRev * 0.25f))
 			e.rev = true;
 	}
-	// bar 4 answers: a stutter, a reverse or a gap on the last beat
+	// bar 4 answers: a stutter, a reverse or a gap on the last beat (not for HOLD: it rings through)
 	int b4 = 3 * STEPS + 12;
-	float r = rng.uni();
+	float r = kind == CP_HOLD ? 1.f : rng.uni();
 	if (r < st.chopStutter) {
 		int s = b4;
 		while (s < LEN && p.chop[s].pad < 0)
@@ -856,6 +1178,106 @@ static void genChop(Pattern& p, const Style& st, const Settings& set, const Samp
 			}
 }
 
+// ---------------------------------------------------------------- the drums' groove (2.7.0)
+const char* const GROOVE_NAMES[NUM_GROOVES] = {"STYLE", "HALF", "DOUBLE", "LAID BACK", "DRUNK", "MINIMAL"};
+const char* const GROOVE_TEXT[NUM_GROOVES] = {
+	"STYLE (as the style plays)",
+	"HALF-TIME (snare on the 3, heavier)",
+	"DOUBLE-TIME (kick and snare twice as fast, 16th hats)",
+	"LAID BACK (snare and hats a little late)",
+	"DRUNK (Dilla: all a little off, the kick stays)",
+	"MINIMAL (only kick, snare and hat)",
+};
+
+static void applyGroove(Pattern& p, int groove, Rng& rng) {
+	if (groove <= G_STYLE || groove >= NUM_GROOVES)
+		return;
+	for (int b = 0; b < BARS; b++) {
+		Hit* bar[DRUMS];
+		for (int v = 0; v < DRUMS; v++)
+			bar[v] = &p.drum[v][b * STEPS];
+		switch (groove) {
+			case G_HALF: {
+				// the main snares (and claps) of beats 2 and 4 go, one heavy snare on the 3; the kick leaves it room
+				bool already = bar[SNARE][8].vel > 0.f && bar[SNARE][4].vel == 0.f && bar[SNARE][12].vel == 0.f;
+				if (already)
+					break;
+				for (int v : {SNARE, CLAP})
+					for (int i : {4, 12})
+						if (bar[v][i].prio <= 0.1f)
+							bar[v][i] = Hit();
+				Hit sn;
+				sn.vel = 1.f;
+				sn.off = rng.range(-0.05f, 0.08f);
+				bar[SNARE][8] = sn;
+				for (int i = 7; i <= 9; i++)
+					if (bar[KICK][i].prio > 0.f || i == 8)
+						bar[KICK][i] = Hit();
+				// the hats on the eighths
+				for (int i = 1; i < STEPS; i += 2)
+					if (bar[CH][i].ratchet <= 1)
+						bar[CH][i] = Hit();
+				break;
+			}
+			case G_DOUBLE: {
+				// the bar's first half played twice as fast for kick, snare and clap; hats on every 16th
+				for (int v : {KICK, SNARE, CLAP, RIM}) {
+					Hit src[STEPS];
+					for (int i = 0; i < STEPS; i++)
+						src[i] = bar[v][i];
+					for (int i = 0; i < STEPS / 2; i++) {
+						bar[v][i] = src[2 * i];
+						bar[v][i + STEPS / 2] = src[2 * i];
+					}
+				}
+				for (int i = 0; i < STEPS; i++)
+					if (bar[CH][i].vel == 0.f) {
+						bar[CH][i].vel = i % 2 ? rng.range(0.3f, 0.45f) : rng.range(0.55f, 0.7f);
+						bar[CH][i].prio = i % 2 ? 0.3f : 0.1f;
+					}
+				break;
+			}
+			case G_LAID:
+				for (int i = 0; i < STEPS; i++) {
+					for (int v : {SNARE, CLAP, RIM})
+						if (bar[v][i].vel > 0.f)
+							bar[v][i].off = std::min(0.45f, std::max(0.f, bar[v][i].off) + rng.range(0.16f, 0.26f));
+					for (int v : {CH, OH, PERC})
+						if (bar[v][i].vel > 0.f)
+							bar[v][i].off = std::min(0.45f, std::max(0.f, bar[v][i].off) + rng.range(0.04f, 0.1f));
+				}
+				break;
+			case G_DRUNK:
+				for (int i = 0; i < STEPS; i++)
+					for (int v = 0; v < DRUMS; v++) {
+						Hit& h = bar[v][i];
+						if (h.vel == 0.f)
+							continue;
+						if (v == KICK)
+							h.off = 0.f;
+						else if (v == SNARE || v == CLAP)
+							h.off = rng.range(0.12f, 0.38f);
+						else
+							h.off = rng.range(-0.28f, 0.28f);
+					}
+				break;
+			case G_MINIMAL:
+				for (int v : {CLAP, RIM, OH, TOM, PERC})
+					for (int i = 0; i < STEPS; i++)
+						bar[v][i] = Hit();
+				for (int i = 0; i < STEPS; i++) {
+					if (bar[KICK][i].prio > 0.5f)
+						bar[KICK][i] = Hit();
+					if (bar[SNARE][i].prio > 0.5f)
+						bar[SNARE][i] = Hit();
+					if (i % 2 && bar[CH][i].ratchet <= 1)
+						bar[CH][i] = Hit();
+				}
+				break;
+		}
+	}
+}
+
 void generate(Pattern& p, int track, const Settings& set, const SampleInfo& si, const PadSet* pads, uint32_t seed,
               bool lockChords, float bpm) {
 	const Style& st = STYLES[std::max(0, std::min(NUM_STYLES - 1, set.style))];
@@ -868,14 +1290,16 @@ void generate(Pattern& p, int track, const Settings& set, const SampleInfo& si, 
 	Chord before[BARS];
 	for (int b = 0; b < BARS; b++)
 		before[b] = p.bar[b];
-	if (track == T_DRUMS || (all && may(T_DRUMS)))
+	if (track == T_DRUMS || (all && may(T_DRUMS))) {
 		genDrums(p, st, rng);
+		applyGroove(p, set.drumMode, rng);
+	}
 	if ((all || track == T_CHOP) && may(T_CHOP))
 		genChop(p, st, set, si, pads, rng, bpm);
 	if ((all || harmony || track == T_CHOP) && !lockChords)
 		genChords(p, st, set, si, pads, rng);
-	// the bass leans on the kicks and the chops' chords (it looks at them when it is rolled); the pads on the chords.
-	// A lane's own NEW changes only that lane: NEW DRUMS keeps the bass (MPC: NEW BASS or NEW ALL roll it again)
+	// the bass leans on the kicks and the chops' chords; the pads on the chords
+	// MPC: a lane's own NEW changes only that lane: NEW DRUMS keeps the bass (NEW BASS or NEW ALL roll it again)
 	if ((all || harmony || track == T_BASS || track == T_CHOP) && may(T_BASS))
 		genBass(p, st, set, si, pads, rng);
 	if ((all || harmony || track == T_MEL) && may(T_MEL))

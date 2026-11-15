@@ -146,6 +146,7 @@ struct Pattern {
 	float swDrum[DRUMS] = {0, 0, 0, 0, 0, 0, 0, 0};
 	bool edited[NUM_TRACKS] = {false, false, false, false, false}; // fixed notes: DENS leaves them, NEW ALL keeps them
 	bool chordFollow = true; // edited bass / melody / pads move with new chords
+	bool loop = false;       // LOOP: the whole (warped) sample loops in time, the chop pattern rests (ABLAUF keeps it per pad)
 	void clear();
 };
 
@@ -178,12 +179,22 @@ struct Settings {
 	int bassMode = 0;  // 0 FOLLOW (the chop's chord), 1 ROOT+5, 2 WALK, 3 808
 	int melMode = 0;   // 0 STAB, 1 LEAD, 2 ARP, 3 RIFF
 	int padMode = 0;   // 0 SUSTAIN, 1 STAB, 2 SWELL
-	int drumMode = 0;  // 0 KIT, 1 BREAK, 2 BOTH
+	int drumMode = 0;  // the drums' GROOVE (2.7.0; was KIT / BREAK / BOTH): see Groove
+	int chopPat = 0;   // the chop pattern's kind (2.7.0): see ChopPat
 };
 extern const char* const BASS_MODES[4];
 extern const char* const MEL_MODES[4];
 extern const char* const PAD_MODES[3];
-extern const char* const DRUM_MODES[3];
+// the drums' groove (2.7.0): the style as it is, or turned half-time, double-time, laid back, drunk, minimal
+enum Groove { G_STYLE, G_HALF, G_DOUBLE, G_LAID, G_DRUNK, G_MINIMAL, NUM_GROOVES };
+extern const char* const GROOVE_NAMES[NUM_GROOVES]; // short, for the field
+extern const char* const GROOVE_TEXT[NUM_GROOVES];  // for the list
+// the kind of chop pattern (2.7.0): AUTO lets the style choose
+enum ChopPat { CP_AUTO, CP_ORDER, CP_STABS, CP_CALL, CP_HOLD, CP_MELODY, CP_HALF, CP_SPARSE, NUM_CHOP_PATS };
+extern const char* const CHOP_PAT_NAMES[NUM_CHOP_PATS]; // short, for the field
+extern const char* const CHOP_PAT_TEXT[NUM_CHOP_PATS];  // for the list
+/** The kind AUTO picks for a style (from its weights; `r` 0..1). */
+int autoChopPat(int style, float r);
 
 /** The chord a pad stands for (the hand-set one, else the detected one; Q_NONE if neither). */
 Chord padChord(const SampleInfo& si, const PadSet* ps, int pad);

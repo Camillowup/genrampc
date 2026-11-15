@@ -208,6 +208,14 @@ class Images:
     def clear(self, w, h):
         return self._write("clear_%dx%d.png" % (w, h), lambda: Img(w, h))
 
+    def sel_frame(self, w, h, t=3):
+        """Two frames: nothing, and a red frame (the chosen voice's column)."""
+        def make():
+            off, on = Img(w, h), Img(w, h)
+            on.outline(0, 0, w, h, RED, t, 6)
+            return strip([off, on])
+        return self._write("selframe_%dx%d.png" % (w, h), make)
+
     def two(self, a, b, w, h, radius=6):
         def make():
             fr = []
@@ -507,27 +515,36 @@ def chop_page(p):
     for i in range(16):
         p.film(steps, 2, "SCHRITT %d" % (i + 1), "%d 266 72 12" % slot_x(i))
     p.dark("20 288 560 332")
-    # per lane: what it plays, MODE < >, DENSITY (Q-Links 9-12), NEW; MODE and DENSITY act with the next NEW
-    dens = img.knob(52)
+    # the CHOPS row (PAT < > and NEW CHOPS), then per lane: what it plays, MODE < > (DRUMS: the groove), DENSITY
+    # (Q-Links 9-12), NEW; PAT, MODE and DENSITY act with the next NEW
+    dens = img.knob(48)
+    y = 292
+    p.caption("chopsl", "32 %d 160 26" % y, 18.0, L_CREAM)
+    p.value("CHOPTEXT", "32 %d 160 22" % (y + 28), 12.0, L_CREAM_MUTED)
+    p.key("PAT BACK", GREY, "prev", "196 %d 34 50" % (y + 1), 22.0, L_KEYINK)
+    p.lcd("234 %d 108 50" % (y + 1))
+    p.value("CHOP PAT", "234 %d 108 50" % (y + 1), 15.0, L_LCD, CENTRED)
+    p.key("PAT NEXT", GREY, "next", "346 %d 34 50" % (y + 1), 22.0, L_KEYINK)
+    p.key("NEW CHOPS", RED, "new", "500 %d 72 50" % (y + 1), 18.0)
     modes = ("DRUM MODE", "BASS MODE", "MELODY MODE", "PADS MODE")
     for k, cap in enumerate(("drums", "bass", "mel", "pads")):
-        y = 294 + k * 76
+        y = 292 + (k + 1) * 62
         if k == 1:  # BASS: OCT -1 / 0 / +1 / +2 beside the name (light grey like the other keys, tap = next)
-            p.caption(cap, "32 %d 64 30" % (y + 2), 20.0, L_CREAM)
-            p.image(p.img.box(GREY, 92, 28), "100 %d 92 28" % (y + 3))
-            p.value("BASS OCT", "100 %d 92 28" % (y + 3), 15.0, L_KEYINK, CENTRED)
-            p.button("OCT TAP", "100 %d 92 28" % (y + 3))
+            p.caption(cap, "32 %d 64 26" % y, 18.0, L_CREAM)
+            p.image(p.img.box(GREY, 92, 26), "100 %d 92 26" % (y + 1))
+            p.value("BASS OCT", "100 %d 92 26" % (y + 1), 14.0, L_KEYINK, CENTRED)
+            p.button("OCT TAP", "100 %d 92 26" % (y + 1))
         else:
-            p.caption(cap, "32 %d 160 30" % (y + 2), 20.0, L_CREAM)
-        p.value("SPURTEXT %d" % (k + 1), "32 %d 160 26" % (y + 34), 13.0, L_CREAM_MUTED)
-        p.key("MODE BACK %d" % (k + 1), GREY, "prev", "196 %d 34 56" % (y + 3), 22.0, L_KEYINK)
-        p.lcd("234 %d 108 56" % (y + 3))
-        p.value(modes[k], "234 %d 108 56" % (y + 3), 17.0, L_LCD, CENTRED)
-        p.key("MODE NEXT %d" % (k + 1), GREY, "next", "346 %d 34 56" % (y + 3), 22.0, L_KEYINK)
-        p.knob_only("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "390 %d 52 52" % (y + 5), dens)
-        p.value("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "444 %d 52 56" % (y + 3), 14.0, L_CREAM, CENTRED)
-        p.key("NEW %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], RED, "new", "500 %d 72 56" % (y + 3), 19.0)
-    p.value("TAKT", "32 594 300 22", 16.0, L_CREAM_MUTED)
+            p.caption(cap, "32 %d 160 26" % y, 18.0, L_CREAM)
+        p.value("SPURTEXT %d" % (k + 1), "32 %d 160 22" % (y + 28), 12.0, L_CREAM_MUTED)
+        p.key("MODE BACK %d" % (k + 1), GREY, "prev", "196 %d 34 50" % (y + 1), 22.0, L_KEYINK)
+        p.lcd("234 %d 108 50" % (y + 1))
+        p.value(modes[k], "234 %d 108 50" % (y + 1), 15.0, L_LCD, CENTRED)
+        p.key("MODE NEXT %d" % (k + 1), GREY, "next", "346 %d 34 50" % (y + 1), 22.0, L_KEYINK)
+        p.knob_only("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "390 %d 48 48" % (y + 2), dens)
+        p.value("DENS %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], "444 %d 52 50" % (y + 1), 13.0, L_CREAM, CENTRED)
+        p.key("NEW %s" % ("DRUMS", "BASS", "MELODY", "PADS")[k], RED, "new", "500 %d 72 50" % (y + 1), 18.0)
+    p.value("TAKT", "32 600 300 18", 13.0, L_CREAM_MUTED)
     p.caption("style", "600 286 120 24", 16.0, L_MUTED)
     p.lcd("600 312 260 52")
     p.value("STYLE", "612 312 244 52", 21.0, L_LCD)
@@ -647,8 +664,8 @@ def schlag_main(p, funcs=False):
     img = p.img
     schlag_header(p)
     p.lcd("196 9 370 46")
-    if funcs:  # the 2nd press of the function key: the Q-Links on the function slots
-        p.caption("qlfuncs", "208 9 350 46", 19.0, L_LCD)
+    if funcs:  # the 2nd press of the function key: the Q-Links on the chosen voice (tap its name)
+        p.value("QLTEXT", "208 9 350 46", 19.0, L_LCD)
     else:
         p.value("KOPFLINK", "208 9 350 46", 19.0, L_LCD)
     p.radio("AUTO PADS", ("auto", "padsmode"), (576, 660), 9, 80, 46, 19.0)
@@ -664,7 +681,10 @@ def schlag_main(p, funcs=False):
         dead = DEAD_VOICES.get(v, 0)
         ink = L_DEAD if dead else L_LCD
         p.dark("%d 66 %d 554" % (x, w))
-        p.caption("v%d" % (v + 1), "%d 70 110 30" % (x + 10), 17.0 if v == 5 else 20.0, L_CREAM)
+        p.film(img.sel_frame(w, 554), 2, "STIMMRAHMEN %d" % (v + 1), "%d 66 %d 554" % (x, w))
+        # the name: white, or red while it is the chosen voice (Q-LINKS: FUNCTIONS and FOLDER follow it)
+        p.value("STIMMNAME %d" % (v + 1), "%d 70 110 30" % (x + 10), 17.0 if v == 5 else 20.0, L_CREAM)
+        p.value("STIMMNAME ROT %d" % (v + 1), "%d 70 110 30" % (x + 10), 17.0 if v == 5 else 20.0, L_RED)
         p.film(lamps, 2, "LAMPE %d" % (v + 1), "%d 77 16 16" % (x + w - 22))
         p.button("WAHL %d" % (v + 1), "%d 66 %d 34" % (x, w))
         p.toggle("M %d" % (v + 1), "m", "%d 102 62 30" % (x + 8), 17.0)
@@ -861,8 +881,9 @@ def main():
         choices = {"BANK": ["A", "B", "C", "D"], "VIEW": ["Sample", "Loop", "Chop"],
                    "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"],
                    "BASS OCT": ["OCT -1", "OCT 0", "OCT +1", "OCT +2"],
+                   "CHOP PAT": ["AUTO", "ORDER", "STABS", "CALL+RESP", "HOLD", "MELODY", "HALF ORIG", "SPARSE"],
                    "LENGTH": ["Auto", "1 bar", "2 bars", "4 bars", "8 bars"],
-                   "REC": ["Off", "On"], "DRUM MODE": ["KIT", "BREAK", "BOTH"],
+                   "REC": ["Off", "On"], "DRUM MODE": ["STYLE", "HALF", "DOUBLE", "LAID BACK", "DRUNK", "MINIMAL"],
                    "BASS MODE": ["FOLLOW", "ROOT+5", "WALK", "808"], "MELODY MODE": ["STAB", "LEAD", "ARP", "RIFF"],
                    "PADS MODE": ["SUSTAIN", "STAB", "SWELL"]}
         screen = tabmap(5, {0: {13: idx["LIST"]},
@@ -880,8 +901,9 @@ def main():
         choices = {"AUTO PADS": ["GENRA", "TRACK"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
         q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
         q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
-        qf = {v + 1: idx["VALUE %d 1" % (v + 1)] for v in range(8)}
-        qf.update({v + 9: idx["VALUE %d 2" % (v + 1)] for v in range(8)})
+        # Q-LINKS: FUNCTIONS: the chosen voice's RANDOM, LEVEL and its 8 functions (stand-ins in the plugin)
+        qf = {i + 1: idx["Q %s" % n] for i, n in enumerate(
+            ["RANDOM", "LEVEL", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
         qs = {i + 1: idx["STEP %s" % n] for i, n in enumerate(
             ["RANDOM", "LEVEL", "CHANCE", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
         screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))

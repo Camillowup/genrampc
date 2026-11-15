@@ -67,7 +67,7 @@ static const char* const kCaptions[][2] = {
     {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
     {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
-    {"clear", "CLEAR"}, {"rec", "● REC"}};
+    {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
@@ -82,6 +82,7 @@ enum
     P_PITCH = 0, P_DECAY, P_FILTER, P_LEVEL,
     P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH, P_REC,
     P_BASSOCT,                         // BASS OCT: -1 / 0 / +1 / +2 octaves on the bass line (at once)
+    P_CHOPPAT,                         // PAT: the chop pattern's kind (AUTO, ORDER, STABS ...), acts with NEW (CHOPS / ALL)
     P_LANEMODE0,                       // per lane: DRUMS KIT/BREAK/BOTH, BASS FOLLOW.., MELODY STAB.., PADS SUSTAIN..
     P_DENS0 = P_LANEMODE0 + kLanes,    // per lane: DENSITY 0..100 % (50 = the style)
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
@@ -89,13 +90,13 @@ enum
     P_UNDO = P_NEW0 + kLanes, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
     P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR,
     P_MODEPREV0, P_MODENEXT0 = P_MODEPREV0 + kLanes,
-    P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_OCTTAP, P_SCROLL,
+    P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_OCTTAP, P_PATPREV, P_PATNEXT, P_NEWCHOPS, P_SCROLL,
     P_ROWTAP0,
     P_SLOTTAP0 = P_ROWTAP0 + kRows,
     // texts
     P_PATH = P_SLOTTAP0 + kPads,
     P_LISTINFO, P_LOADED, P_HDR, P_CHOPSTXT, P_BARTXT, P_STATUS, P_LEARNINFO, P_MAPINFO, P_DRIVES, P_WRITE,
-    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR,
+    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR, P_CHOPTXT,
     P_STYLENAME0,
     P_SLOTTXT0 = P_STYLENAME0 + hh::NUM_STYLES,
     P_SLOTLEN0 = P_SLOTTXT0 + kPads,
@@ -232,7 +233,8 @@ public:
         addParam(choiceParam("length", "LENGTH", {"Auto", "1 bar", "2 bars", "4 bars", "8 bars"}, 0));
         addParam(boolParam("rec", "REC", false));
         addParam(choiceParam("bassoct", "BASS OCT", {"OCT -1", "OCT 0", "OCT +1", "OCT +2"}, 1));
-        addParam(choiceParam("drummode", "DRUM MODE", {hh::DRUM_MODES, hh::DRUM_MODES + 3}, 0));
+        addParam(choiceParam("choppat", "CHOP PAT", {hh::CHOP_PAT_NAMES, hh::CHOP_PAT_NAMES + hh::NUM_CHOP_PATS}, 0));
+        addParam(choiceParam("drummode", "DRUM MODE", {hh::GROOVE_NAMES, hh::GROOVE_NAMES + hh::NUM_GROOVES}, 0)); // the groove (2.7.0)
         addParam(choiceParam("bassmode", "BASS MODE", {hh::BASS_MODES, hh::BASS_MODES + 4}, 0));
         addParam(choiceParam("melmode", "MELODY MODE", {hh::MEL_MODES, hh::MEL_MODES + 4}, 0));
         addParam(choiceParam("padmode", "PADS MODE", {hh::PAD_MODES, hh::PAD_MODES + 3}, 0));
@@ -254,12 +256,15 @@ public:
         addButton("REV");
         addButton("LOCK");
         addButton("OCT TAP");
+        addButton("PAT BACK");
+        addButton("PAT NEXT");
+        addButton("NEW CHOPS");
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int i = 0; i < kRows; ++i) addButton(("TIPP " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
         for (const char* t : {"PFAD", "LISTINFO", "GELADEN", "KOPF", "CHOPZAHL", "TAKT", "STATUS", "LERNINFO",
                               "BELEGUNG", "LAUFWERKSLISTE", "SCHREIBEN", "LINKINFO", "ANALYSE", "SPEICHERORT",
-                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF"})
+                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF", "CHOPTEXT"})
             addText(t);
         for (int i = 0; i < hh::NUM_STYLES; ++i) addText(("STYLENAME " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTTEXT " + std::to_string(i + 1)).c_str());
@@ -1000,9 +1005,11 @@ private:
         {
             if (track < 0) { undoPat_ = pat_; hasUndo_ = true; }
             else if (track < kLanes) { laneUndo_[track] = pat_; laneHasUndo_[track] = true; }
+            else { undoPat_ = pat_; hasUndo_ = true; } // NEW CHOPS: UNDO brings the chops back
         }
         set_.style = clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1);
-        set_.drumMode = clamp(getInt(P_LANEMODE0 + 0), 0, 2);
+        set_.drumMode = clamp(getInt(P_LANEMODE0 + 0), 0, hh::NUM_GROOVES - 1);
+        set_.chopPat = clamp(getInt(P_CHOPPAT), 0, hh::NUM_CHOP_PATS - 1);
         set_.bassMode = clamp(getInt(P_LANEMODE0 + 1), 0, 3);
         set_.melMode = clamp(getInt(P_LANEMODE0 + 2), 0, 3);
         set_.padMode = clamp(getInt(P_LANEMODE0 + 3), 0, 2);
@@ -1337,6 +1344,12 @@ private:
             if (on) ++alive;
             screen_.setFrame(P_LAMP0 + k, on ? 1 : 0);
             screen_.setText(P_LANETXT0 + k, laneSummary(k, on));
+            if (k == 0)
+            {
+                int hits = 0;
+                for (int st = 0; st < kSteps; ++st) hits += rend_.chop[st].pad >= 0;
+                screen_.setText(P_CHOPTXT, std::to_string(info_.count) + " chops · " + std::to_string(hits) + " hits");
+            }
         }
         linked_ = alive;
         // LINK and MIDI OUT share the row: "2 linked · OUT 130:0 · 512"
@@ -1531,6 +1544,17 @@ private:
             const int p = t.first;
             if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: new loop at the end of the pattern"); }
             else if (p == P_OCTTAP) setParam(P_BASSOCT, (float)((getInt(P_BASSOCT) + 1) % 4));
+            else if (p == P_PATPREV || p == P_PATNEXT)
+            {
+                const int n = hh::NUM_CHOP_PATS;
+                setParam(P_CHOPPAT, (float)((getInt(P_CHOPPAT) + (p == P_PATNEXT ? 1 : n - 1)) % n));
+                screen_.message(P_STATUS, std::string("PAT ") + hh::CHOP_PAT_NAMES[clamp(getInt(P_CHOPPAT), 0, n - 1)] + ": with NEW", 2500);
+            }
+            else if (p == P_NEWCHOPS)
+            {
+                regenerate(hh::T_CHOP);
+                screen_.message(P_STATUS, "NEW CHOPS: at the end of the pattern");
+            }
             else if (p >= P_NEW0 && p < P_NEW0 + kLanes) newLane(p - P_NEW0);
             else if (p == P_UNDO)
             {
@@ -1573,7 +1597,7 @@ private:
             }
             else if (p >= P_MODEPREV0 && p < P_MODENEXT0 + kLanes)
             {
-                static const int n[kLanes] = {3, 4, 4, 3};
+                static const int n[kLanes] = {hh::NUM_GROOVES, 4, 4, 3};
                 int k = (p - P_MODEPREV0) % kLanes, d = p >= P_MODENEXT0 ? 1 : n[k] - 1;
                 setParam(P_LANEMODE0 + k, (float)((getInt(P_LANEMODE0 + k) + d) % n[k]));
                 screen_.message(P_STATUS, "MODE: with the next NEW", 2500);

@@ -9,8 +9,8 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.9 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** 0.10 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
+| **GENRA CHOP** 0.10 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA SCHLAG** 0.11 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
 GENRA CHOP sends every lane as MIDI on its own channel (see MIDI OUT). Both plugins play on the MPC's transport:
@@ -66,9 +66,12 @@ For every track that should play a lane (a keygroup, a plugin, a drum program):
 - Never set GENRA CHOP's own track to GENRA CHOP OUT.
 
 **5. Record into sequences.** Arm the tracks, press Record: the lanes land in the MPC sequence (Sequence 1). Then
-NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on. To play the recorded sequences back, stop GENRA
-playing along: tracks on MIDI from GENRA CHOP: Monitor OFF (or GENRA CHOP on PADS); SCHLAG on **TRACK** (it then
-plays only its own track's notes, and GENRA CHOP sends no drums on channel 10).
+NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on.
+- **The drums into SCHLAG's own track:** SCHLAG's track: MIDI input **GENRA CHOP OUT, channel 10**, Monitor
+  **MERGE**, SCHLAG on **GENRA**. Record: the drum notes land in the track; SCHLAG skips them while recording (they
+  are GENRA's own), so nothing sounds twice.
+- **Play back:** SCHLAG on **TRACK** (it plays only its track's notes, and GENRA CHOP sends no drums on channel 10);
+  the other tracks on MIDI from GENRA CHOP: Monitor OFF (or GENRA CHOP on PADS).
 
 ## GENRA CHOP (instrument, e.g. track 1)
 
@@ -79,8 +82,16 @@ plays only its own track's notes, and GENRA CHOP sends no drums on channel 10).
   **REV** (the selected chop backwards) and **LOCK** (the chop keeps its pad on NEW), PITCH / DECAY / FILTER / LEVEL,
   STATUS, **REC**, **CLEAR**, SAVE WAV. Chop slots show R / L for reversed / locked. A pad played on the MPC
   selects its chop: REV, LOCK and the knobs act on the pad played last.
+  - **CHOPS** (the row on top, from GENRA CHOP 2.7.0 for VCV): **PAT < >**, the kind of chop pattern: **AUTO** (the
+    style chooses), **ORDER** (the chops as in the sample, each as long as it is), **STABS** (short hits on a rhythm),
+    **CALL+RESP** (bars 1 and 3 call, 2 and 4 answer with other chops), **HOLD** (few long chops, a chord per bar),
+    **MELODY** (one chop plays a little tune in the key), **HALF ORIG** (a bar as in the sample, the next rearranged),
+    **SPARSE** (one or two chops a bar, room for rap). Each style has its own chop rhythms, and the chops follow the
+    style's chord progression (per bar the chop whose chord fits; styles that pitch tune it to fit). PAT acts with
+    **NEW** (the row's own: only the chops, and the bass and pads that lean on them) or NEW ALL. Chops are cut right
+    before the attack and fade out over 5 ms.
   - **The lanes** DRUMS / BASS / MELODY / PADS: what the lane plays (hits, notes, the bars' chords), **MODE < >**
-    (drums KIT / BREAK / BOTH, bass FOLLOW / ROOT+5 / WALK / 808, melody STAB / LEAD / ARP / RIFF, pads SUSTAIN /
+    (drums: the **groove** STYLE / HALF / DOUBLE / LAID BACK / DRUNK / MINIMAL, bass FOLLOW / ROOT+5 / WALK / 808, melody STAB / LEAD / ARP / RIFF, pads SUSTAIN /
     STAB / SWELL), **DENSITY** (50 % = the style; Q-Links 9-12) and **NEW**. MODE and DENSITY act with the next NEW
     (the lane's own or NEW ALL); the new lane starts at the end of the pattern. A lane's NEW changes only that lane
     (NEW DRUMS keeps the bass; NEW BASS rolls it to the kicks playing now). **NEW ALL rolls every lane**, also one you
@@ -129,9 +140,12 @@ In the MPC's plugin list as **GENRA SCHLAG** (next to GENRA CHOP); on its pages 
   GENRA CHOP sends no drums on MIDI channel 10, so a recorded sequence does not play twice. After PRINT it is TRACK.
   Tap a voice's **name** to choose it: the FOLDER page then opens its folder (switch pages with the MPC's function
   keys). No pads on the screen: play the voices on the MPC's pads.
-  - **Press SCHLAG's function key again**: the same page with the Q-Links on the function slots (Q-Links 1-8 = the
-    upper slot of each voice, 9-16 = the lower one); the header says `Q-LINKS: FUNCTIONS`. Press again = RANDOM and
-    LEVEL. The Q-Links outside the plugin (program mode) stay on RANDOM and LEVEL.
+  - **The chosen voice**: tap a voice's name. Its column gets a red frame and a red name; the FOLDER page and the
+    Q-Links below follow it.
+  - **Press SCHLAG's function key again**: the Q-Links on the chosen voice (the header says `Q-LINKS: SNARE`):
+    1 RANDOM, 2 LEVEL, 3 TUNE, 4 DECAY, 5 DRIVE, 6 BITS, 7 REPEAT, 8 PAN, 9 REVERSE, 10 FILTER. Tap another name:
+    the Q-Links follow it at once. Press again = RANDOM and LEVEL of all eight voices. The Q-Links outside the plugin
+    (program mode) stay on RANDOM and LEVEL.
 - **STEPS**: GENRA's drum pattern, 8 voices x 16 steps of a bar (BAR 1-4), the play head in red. Bright = loud,
   grey = soft; a red bar left / right = GENRA plays the hit early / late; a red dot = the step has its own values, a
   red line under it = its own RANDOM, a blue square = its own sample. Tap a step: the editor below is for **this
@@ -163,7 +177,10 @@ In the MPC's plugin list as **GENRA SCHLAG** (next to GENRA CHOP); on its pages 
     that again. Older kits elsewhere still load from the list.
   - SAVE SAMPLE writes into the folder open in the list, else into the voice's folder, else into the root folder.
 - **MIDI in**: notes on **channel 10** are read as MPC drum-program notes (A01-A08 = KICK .. PERC, as GENRA CHOP OUT
-  sends them); other channels use the pad map. **MPC KIT NOTES** (SETUP) reads every channel that way.
+  sends them); other channels use the pad map. **MPC KIT NOTES** (SETUP) reads every channel that way. On **GENRA**,
+  a channel-10 note where GENRA's loop has that voice's hit is GENRA CHOP OUT coming back: SCHLAG skips it (LINK plays
+  it already), so recording the drums does not sound twice; pads off the loop still play. On **TRACK** every note
+  plays.
 - **PRINT**, **SETUP** (LEARN, HAT CHOKE, MPC KIT NOTES, pad map, root folder, LINK, version).
 - Projects with SCHLAG 0.6 or older: the plugin is now called GENRA SCHLAG; load it again on the track.
 - Without GENRA CHOP SCHLAG plays a built-in kit; a voice holds up to 128 WAVs of its folder or 16 MB, whichever comes first (WAVs of up to 2 s).
@@ -185,6 +202,10 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.10 / GENRA SCHLAG 0.11: PAT (does each kind sound different, AUTO per style?), the drum grooves,
+  NEW CHOPS; the chosen voice (red frame) and the Q-Links following it; recording the drums into SCHLAG's track on
+  GENRA without doubling.
 
 - GENRA SCHLAG 0.10: the new main page (< > per voice, the name tap, RANDOM 100 with its value inside, bigger knobs,
   no pads): do < > step through the folder and does a tap on the ring turn it?

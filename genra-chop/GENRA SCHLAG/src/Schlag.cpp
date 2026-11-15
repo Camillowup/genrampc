@@ -57,6 +57,7 @@ enum RandomKind { RK_SAMPLE, RK_POOL, RK_PITCH, RK_GHOST, RK_SHORT, RK_FLIP, RK_
 const char* const kRandomKinds[NUM_RKINDS] = {"SAMPLE", "POOL", "PITCH", "GHOST", "SHORT", "FLIP", "TEXTURE"};
 // STEPS: per step RANDOM and the 8 functions (a lock overrides the main page for that step only)
 // lock order: 0 RANDOM, 1..8 the functions, 9 LEVEL (dB), 10 CHANCE (%)
+static const int kQL = 2 + NUM_FUNCS; // Q-LINKS: FUNCTIONS: RANDOM, LEVEL and the 8 functions of the chosen voice
 static const int kLocks = 3 + NUM_FUNCS, kGrid = 8 * 16, LK_LEVEL = 1 + NUM_FUNCS, LK_CHANCE = 2 + NUM_FUNCS;
 // CONDITION per step (pass of the loop): 0 = none (GENRA's), then n of 2 / n of 4 / not the 1st pass
 static const int NUM_CONDS = 8;
@@ -99,8 +100,9 @@ enum
     P_RKIND0 = P_LIVE0 + kVoices,         // per voice: what RANDOM does (SAMPLE .. TEXTURE)
     P_BAR = P_RKIND0 + kVoices,           // STEPS: the bar shown
     P_SLK0,                               // STEPS: the selected step's RANDOM + 8 functions (knobs)
+    P_QL0 = P_SLK0 + kLocks,              // Q-LINKS: FUNCTIONS: stand-ins for the chosen voice (tap its name)
     // buttons
-    P_NEW = P_SLK0 + kLocks, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
+    P_NEW = P_QL0 + kQL, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
     P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT, P_CLEARALL, P_EMPTY, P_LOADKIT,  // flashes 0..21
     P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
@@ -114,12 +116,14 @@ enum
     P_VNEXT0 = P_VPREV0 + kVoices,        // main page: > per voice
     // texts
     P_HDRLINK = P_VNEXT0 + kVoices, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
-    P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT,
+    P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT, P_QLTXT,
     P_SLKTXT0,                            // the step knobs' values ("—" = the main page's)
     P_RINGTXT0 = P_SLKTXT0 + kLocks,      // the RANDOM amount in the ring
     P_FOLDERTXT0 = P_RINGTXT0 + kVoices,
     P_SAMPLETXT0 = P_FOLDERTXT0 + kVoices,
-    P_ROWT0 = P_SAMPLETXT0 + kVoices,
+    P_VNAME0 = P_SAMPLETXT0 + kVoices,    // the voice's name (white), empty while it is the chosen one
+    P_VNAMESEL0 = P_VNAME0 + kVoices,     // the chosen voice's name (red)
+    P_ROWT0 = P_VNAMESEL0 + kVoices,
     P_PRINTROW0 = P_ROWT0 + kRows,
     P_CAP0 = P_PRINTROW0 + kPrintRows,
     // film strips
@@ -129,7 +133,8 @@ enum
     P_FLASH0 = P_PADLIT0 + kVoices,
     P_SCELL0 = P_FLASH0 + kFlashes,       // STEPS cells: v * 16 + column (144 frames, see stepTexts)
     P_PLAY0 = P_SCELL0 + kGrid,           // STEPS: the play head, per column
-    P_COUNT = P_PLAY0 + 16
+    P_VSEL0 = P_PLAY0 + 16,               // main page: the chosen voice's red frame (2 frames)
+    P_COUNT = P_VSEL0 + kVoices
 };
 
 // a sample in memory (16 bit)
@@ -243,6 +248,14 @@ public:
             q.automatable = false;
             addParam(q);
         }
+        for (int i = 0; i < kQL; ++i)
+        {
+            const std::string n = i == 0 ? "RANDOM" : i == 1 ? "LEVEL" : kFuncNames[i - 2];
+            Param q = i == 1 ? floatParam(("ql_" + n).c_str(), ("Q " + n).c_str(), -40.f, 6.f, 0.f, "dB", 1)
+                             : floatParam(("ql_" + n).c_str(), ("Q " + n).c_str(), 0.f, 100.f, i == 0 ? 0.f : defaultValue(i - 2), "", 0);
+            q.automatable = false;
+            addParam(q);
+        }
         for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP",
                               "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT"})
             addButton(b);
@@ -259,12 +272,14 @@ public:
         for (int v = 0; v < kVoices; ++v) addButton(("VOICE NEXT " + std::to_string(v + 1)).c_str());
         for (const char* t : {"KOPFLINK", "PFAD", "LISTINFO", "STIMMINFO", "STIMMORDNER", "STIMMSAMPLE", "STIMMANZAHL",
                               "STATUS", "PRINTINFO", "PRINTSTATUS", "PRINTORDNER", "LERNINFO", "BELEGUNG", "HAUPTORDNER",
-                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND"})
+                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND", "QLTEXT"})
             addText(t);
         for (int i = 0; i < kLocks; ++i) addText(("STEPWERT " + std::to_string(i + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("RINGTEXT " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("ORDNERTEXT " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("SAMPLETEXT " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addText(("STIMMNAME " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addText(("STIMMNAME ROT " + std::to_string(v + 1)).c_str());
         for (int r = 0; r < kRows; ++r) addText(("ZEILE " + std::to_string(r + 1)).c_str());
         for (int r = 0; r < kPrintRows; ++r) addText(("PRINTZEILE " + std::to_string(r + 1)).c_str());
         for (const auto& c : kCaptions) addText((std::string("CAP ") + c[0]).c_str());
@@ -275,6 +290,7 @@ public:
         for (int i = 0; i < kFlashes; ++i) addText(("BLITZ " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kGrid; ++i) addText(("SCHRITT " + std::to_string(i / 16 + 1) + " " + std::to_string(i % 16 + 1)).c_str());
         for (int j = 0; j < 16; ++j) addText(("KOPFSPALTE " + std::to_string(j + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addText(("STIMMRAHMEN " + std::to_string(v + 1)).c_str());
         if (numParams() != P_COUNT) std::abort();
 
         screen_.init();
@@ -286,10 +302,11 @@ public:
         for (int i = P_FUNCTAP0; i < P_VNEXT0 + kVoices; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         for (int i = 0; i < kGrid; ++i) screen_.strip(P_SCELL0 + i, 144);
         for (int j = 0; j < 16; ++j) screen_.strip(P_PLAY0 + j, 2);
+        for (int v = 0; v < kVoices; ++v) screen_.strip(P_VSEL0 + v, 2);
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.10 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.11 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -503,6 +520,17 @@ public:
                 // channel 10 (GENRA CHOP OUT, MPC drum notes) or MPC KIT NOTES: A01-A08 = the voices; else the pad map
                 int pad = (e.channel() == 9 || kitNotes) ? kitVoice(e.note()) : pads_.padOf(e.note());
                 if (pad < 0 || pad >= kVoices) continue;
+                // GENRA: a note on channel 10 where GENRA's loop has this voice's hit is GENRA CHOP OUT coming back
+                // (its own drums, e.g. while the track records them): LINK plays it already. Pads off the loop still play.
+                if (autoMode && playing && e.channel() == 9 && cur_ >= 0)
+                {
+                    long n = (long)std::llround((tr.ppqPos + (double)i / (spStep * 4.0)) * 4.0) - start;
+                    long pos = ((n % len) + len) % len;
+                    const int s0 = (int)(pos % kSteps);
+                    bool echo = false;
+                    for (int d = -1; d <= 1 && !echo; ++d) echo = loop->drum[pad][(s0 + d + kSteps) % kSteps].vel > 0;
+                    if (echo) continue;
+                }
                 // a note of the MPC track: its position (16th 0-63 in 4 bars) decides its sample, like a loop hit
                 int step = -1;
                 uint32_t round = 0;
@@ -668,6 +696,15 @@ public:
         if (index >= P_LIVE0 && index < P_LIVE0 + kVoices) { out = plain >= 0.5f ? "LIVE" : "HOLD"; return true; }
         if (index >= P_RKIND0 && index < P_RKIND0 + kVoices) { out = kRandomKinds[clamp((int)std::lround(plain), 0, NUM_RKINDS - 1)]; return true; }
         if (index >= P_SLK0 && index < P_SLK0 + kLocks) { out = lockText(index - P_SLK0, plain); return true; }
+        if (index >= P_QL0 && index < P_QL0 + kQL)
+        {
+            const int i = index - P_QL0;
+            if (i == 0) std::snprintf(b, sizeof b, "%.0f %%", plain);
+            else if (i == 1) std::snprintf(b, sizeof b, "%+.1f dB", plain);
+            if (i < 2) out = b;
+            else out = valueText(i - 2, plain);
+            return true;
+        }
         if (index >= P_LEVEL0 && index < P_LEVEL0 + kVoices) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
         if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots)
         {
@@ -1322,6 +1359,16 @@ private:
         if (alive) std::snprintf(b, sizeof b, "LINK GENRA CHOP · %.0f BPM", bpm100 / 100.0);
         else std::snprintf(b, sizeof b, "no GENRA CHOP");
         screen_.setText(P_HDRLINK, b);
+        {
+            const int qv = clamp(getInt(P_VOICE), 0, kVoices - 1);
+            screen_.setText(P_QLTXT, std::string("Q-LINKS: ") + kVoiceNames[qv]);
+            for (int v = 0; v < kVoices; ++v)
+            {
+                screen_.setText(P_VNAME0 + v, v == qv ? std::string() : std::string(kVoiceNames[v]));
+                screen_.setText(P_VNAMESEL0 + v, v == qv ? std::string(kVoiceNames[v]) : std::string());
+                screen_.setFrame(P_VSEL0 + v, v == qv ? 1 : 0);
+            }
+        }
         for (int v = 0; v < kVoices; ++v)
         {
             screen_.setText(P_FOLDERTXT0 + v, folderLabel(kitInfo_[v].folder));
@@ -1377,6 +1424,28 @@ private:
     }
     // the editor's knobs: a step (its own values, else the main page's; a knob turned = the step's own) or a whole
     // lane (the main page's values, written there)
+    // Q-LINKS: FUNCTIONS: the stand-ins follow the chosen voice; turning one writes the voice's value, a value changed
+    // elsewhere (main page, STEPS' lane, a kit) comes back to the stand-in
+    int qlTarget(int v, int i) const { return i == 0 ? P_RANDOM0 + v : i == 1 ? P_LEVEL0 + v : P_FV0 + v * NUM_FUNCS + (i - 2); }
+    void syncQ(bool force)
+    {
+        const int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
+        if (force || v != qlVoice_)
+        {
+            qlVoice_ = v;
+            for (int i = 0; i < kQL; ++i) { qlShown_[i] = get(qlTarget(v, i)); setParam(P_QL0 + i, qlShown_[i]); }
+            return;
+        }
+        bool slots = false;
+        for (int i = 0; i < kQL; ++i)
+        {
+            const float pv = get(P_QL0 + i), tv = get(qlTarget(v, i));
+            if (std::fabs(pv - qlShown_[i]) > 1e-4f) { qlShown_[i] = pv; setParam(qlTarget(v, i), pv); slots = slots || i >= 2; }
+            else if (std::fabs(tv - qlShown_[i]) > 1e-4f) { qlShown_[i] = tv; setParam(P_QL0 + i, tv); }
+        }
+        if (slots) syncSlots(true); // a function slot that shows it follows at once
+    }
+
     void syncLocks(bool force)
     {
         const int v = stepSel_ >= 0 ? stepSel_ / kSteps : laneSel_, st = stepSel_ >= 0 ? stepSel_ % kSteps : 0;
@@ -1800,6 +1869,8 @@ private:
                 if (browser_.cwd().empty()) browser_.list();
             }
             syncSlots(false);
+            syncQ(!qlInit_);
+            qlInit_ = true;
             // a voice chosen (page SCHLAG or FOLDER): the list opens its folder
             int vNow = clamp(getInt(P_VOICE), 0, kVoices - 1);
             if (vNow != lastVoice)
@@ -1882,6 +1953,9 @@ private:
     std::mutex mtx_;
     std::string voiceFolder_[kVoices], voiceFile_[kVoices];
     bool loadReq_[kVoices] = {};
+    int qlVoice_ = -1;                      // worker: Q-LINKS: FUNCTIONS
+    float qlShown_[kQL] = {};
+    bool qlInit_ = false;
     int loadTotal_ = 0, loadMissing_ = 0;  // worker: the voices of this kit / project load, the folders missing
     std::string loadName_;                 // worker: what to say when the kit is in
 };
