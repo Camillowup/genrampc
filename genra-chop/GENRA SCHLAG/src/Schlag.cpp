@@ -110,8 +110,10 @@ enum
     P_RKINDTAP0 = P_ROWTAP0 + kRows,      // tap the RANDOM field: the next kind
     P_STEPTAP0 = P_RKINDTAP0 + kVoices,   // STEPS: v * 16 + column
     P_LANETAP0 = P_STEPTAP0 + kGrid,      // STEPS: a voice's name = the whole lane in the editor
+    P_VPREV0 = P_LANETAP0 + kVoices,      // main page: < per voice (the previous sample of its folder)
+    P_VNEXT0 = P_VPREV0 + kVoices,        // main page: > per voice
     // texts
-    P_HDRLINK = P_LANETAP0 + kVoices, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
+    P_HDRLINK = P_VNEXT0 + kVoices, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
     P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT,
     P_SLKTXT0,                            // the step knobs' values ("—" = the main page's)
     P_RINGTXT0 = P_SLKTXT0 + kLocks,      // the RANDOM amount in the ring
@@ -143,7 +145,8 @@ struct Sample
 struct Kit
 {
     std::vector<Sample> samples;
-    int base = 0;
+    std::vector<std::string> files; // the WAV file of each sample ("" for built in / EMPTY)
+    std::atomic<int> base{0};       // the voice's own sample; < > on the main page change it while it plays
 };
 
 // a voice set to EMPTY keeps this as its folder (in projects and kits)
@@ -252,6 +255,8 @@ public:
         for (int v = 0; v < kVoices; ++v) addButton(("KIND TAP " + std::to_string(v + 1)).c_str());
         for (int i = 0; i < kGrid; ++i) addButton(("STEP TAP " + std::to_string(i / 16 + 1) + " " + std::to_string(i % 16 + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addButton(("LANE TAP " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addButton(("VOICE PREV " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addButton(("VOICE NEXT " + std::to_string(v + 1)).c_str());
         for (const char* t : {"KOPFLINK", "PFAD", "LISTINFO", "STIMMINFO", "STIMMORDNER", "STIMMSAMPLE", "STIMMANZAHL",
                               "STATUS", "PRINTINFO", "PRINTSTATUS", "PRINTORDNER", "LERNINFO", "BELEGUNG", "HAUPTORDNER",
                               "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND"})
@@ -278,13 +283,13 @@ public:
         for (int i = 0; i < kVoices * 16; ++i) screen_.strip(P_CELL0 + i, 3);
         for (int v = 0; v < kVoices; ++v) { screen_.strip(P_LAMP0 + v, 2); screen_.strip(P_PADLIT0 + v, 2); }
         for (int i = 0; i < kFlashes; ++i) screen_.button(P_NEW + i, P_FLASH0 + i);
-        for (int i = P_FUNCTAP0; i < P_LANETAP0 + kVoices; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
+        for (int i = P_FUNCTAP0; i < P_VNEXT0 + kVoices; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         for (int i = 0; i < kGrid; ++i) screen_.strip(P_SCELL0 + i, 144);
         for (int j = 0; j < 16; ++j) screen_.strip(P_PLAY0 + j, 2);
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.9 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.10 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -859,14 +864,15 @@ private:
         const int kind = pk ? clamp(getInt(P_RKIND0 + v), 0, NUM_RKINDS - 1) : -1;
         // the sample: SAMPLE = another one of the voice's folder, POOL = any of all eight voices' samples
         const Kit* kk = k;
-        int si = k->base;
+        const int base = k->base.load(std::memory_order_relaxed);
+        int si = base;
         // STEPS: a step's own sample (from the voice's folder); RANDOM then does not swap the sample there
         const int own = step >= 0 ? smpLock_[v][step & (kSteps - 1)].load(std::memory_order_relaxed) : -1;
         if (own >= 0 && own < (int)k->samples.size()) si = own;
         else if (kind == RK_SAMPLE && k->samples.size() > 1)
         {
             int n = (int)k->samples.size(), alt = (int)(mix(roll ^ 0x85ebca6bu) % (uint32_t)(n - 1));
-            si = alt >= k->base ? alt + 1 : alt;
+            si = alt >= base ? alt + 1 : alt;
         }
         else if (kind == RK_POOL && own < 0)
         {
@@ -971,6 +977,7 @@ private:
             if (!loadWav(folder + "/" + files[(size_t)i], w, kMaxSeconds)) continue;
             if (i == baseIdx) k->base = (int)k->samples.size();
             k->samples.push_back(toSample(w, stripWav(files[(size_t)i])));
+            k->files.push_back(files[(size_t)i]);
             used += (k->samples.back().L.size() + k->samples.back().R.size()) * 2;
         }
         if (k->samples.empty()) { delete k; return false; }
@@ -1116,7 +1123,7 @@ private:
         int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
         Kit* k = kit_[v].load(std::memory_order_acquire); // kits are freed only by this thread
         if (!k || k->samples.empty()) { screen_.message(P_LISTINFO, "no sample"); return; }
-        const Sample& s = k->samples[(size_t)clamp(k->base, 0, (int)k->samples.size() - 1)];
+        const Sample& s = k->samples[(size_t)clamp(k->base.load(), 0, (int)k->samples.size() - 1)];
         std::string dir = saveDir(v);
         if (dir.empty()) { screen_.message(P_LISTINFO, "open a folder first"); return; }
         Player p;
@@ -1270,6 +1277,25 @@ private:
         screen_.message(P_LISTINFO, "KIT: loading " + name + " ...", 4000);
     }
 
+    // < > on the main page: the voice's own sample steps through its folder (the samples in memory), at once
+    void stepSample(int v, int dir)
+    {
+        Kit* k = kit_[v].load(std::memory_order_acquire); // kits are freed only by this thread
+        if (!k || k->files.empty() || k->files[0].empty()) { screen_.message(P_HDRLINK, std::string(kVoiceNames[v]) + ": open a folder", 2500); return; }
+        const int n = (int)k->samples.size();
+        const int b = ((k->base.load() + dir) % n + n) % n;
+        k->base.store(b);
+        kitInfo_[v].file = k->samples[(size_t)b].name;
+        {
+            std::lock_guard<std::mutex> g(mtx_);
+            voiceFile_[v] = k->files[(size_t)b];
+        }
+        char t[16];
+        std::snprintf(t, sizeof t, " %d/%d", b + 1, n);
+        screen_.message(P_HDRLINK, std::string(kVoiceNames[v]) + ": " + k->samples[(size_t)b].name.substr(0, 14) + t, 2500);
+        audition_.store(v * 1024 + b + 1);
+    }
+
     // LOAD KIT: the list shows the Kits folder
     void openKits()
     {
@@ -1396,7 +1422,7 @@ private:
             screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · whole lane");
             for (int i = 0; i < kLocks; ++i) screen_.setText(P_SLKTXT0 + i, i == LK_CHANCE ? std::string("—") : lockText(i, laneValue(v, i)));
             Kit* k = kit_[v].load();
-            screen_.setText(P_SMPTXT, k && !k->samples.empty() ? k->samples[(size_t)k->base].name : std::string("—"));
+            screen_.setText(P_SMPTXT, k && !k->samples.empty() ? k->samples[(size_t)clamp(k->base.load(), 0, (int)k->samples.size() - 1)].name : std::string("—"));
             screen_.setText(P_CONDTXT, "—");
         }
         else
@@ -1673,7 +1699,7 @@ private:
                         if (next >= n) next = -1;
                         if (next < -1) next = n - 1;
                         smpLock_[v][st].store((int16_t)next);
-                        audition_.store(v * 1024 + (next >= 0 ? next : k->base) + 1);
+                        audition_.store(v * 1024 + (next >= 0 ? next : k->base.load()) + 1);
                     }
                 }
                 else if (p == P_SMPPREV || p == P_SMPNEXT)
@@ -1759,6 +1785,11 @@ private:
                     screen_.message(P_STATUS, std::string(kVoiceNames[v]) + " chosen: page FOLDER");
                 }
                 else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
+                else if (p >= P_VPREV0 && p < P_VNEXT0 + kVoices)
+                {
+                    const int v = (p - P_VPREV0) % kVoices;
+                    stepSample(v, p >= P_VNEXT0 ? 1 : -1);
+                }
             }
             if (pads_.finishIfDone()) screen_.message(P_LEARNINFO, "learned and saved", 3000);
             if (nowMs() - lastSlow > 1500)

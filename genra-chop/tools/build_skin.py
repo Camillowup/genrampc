@@ -272,12 +272,16 @@ class Images:
         def frame(k):
             i = Img(size, size)
             c = size / 2.0
-            i.disc(c, c, c - 1, KNOB)
+            r_in = c * 0.55
+            for yy in range(size):  # a ring: the middle stays see-through (the value lies under it)
+                for xx in range(size):
+                    d = math.hypot(xx + 0.5 - c, yy + 0.5 - c)
+                    if r_in <= d <= c - 1:
+                        i.put(xx, yy, KNOB)
             lit = int(round(k / 126.0 * 24))
             for d in range(24):
                 a = d / 24.0 * 2 * math.pi
                 i.disc(c + (c - 8) * math.sin(a), c - (c - 8) * math.cos(a), 2.6, RED_LIT if d < lit else (0x5A, 0x5C, 0x58))
-            i.disc(c, c, c * 0.55, (0x32, 0x32, 0x30))
             return i
         return self._write("ring%d.png" % size, lambda: strip([frame(k) for k in range(127)]))
 
@@ -651,49 +655,47 @@ def schlag_main(p, funcs=False):
     p.key("UNDO", GREY, "undo", "746 9 120 46", 20.0, L_KEYINK)
     p.key("BASIC", GREY, "basic", "872 9 120 46", 20.0, L_KEYINK)
     p.key("NEW", RED, "new", "998 9 262 46", 24.0)
-    lamps, ring, small = img.lamps(), img.ring(72), img.knob(52)
-    pad = img.two(PAD, RED_LIT, 145, 62, 7)
+    # 0.10: no folder / sample fields and no pads: < > per voice steps through its folder's samples (the name shows
+    # in the header), a tap on the voice's name chooses it for the FOLDER page; RANDOM 100 px with its value under
+    # the ring (the ring's middle is see-through, so a tap is the knob's); slots with a smaller field, knob 60.
+    lamps, ring, small = img.lamps(), img.ring(100), img.knob(60)
     for v in range(8):
         x, w = 20 + v * 155, 145
         dead = DEAD_VOICES.get(v, 0)
         ink = L_DEAD if dead else L_LCD
-        p.dark("%d 66 %d 484" % (x, w))
-        p.caption("v%d" % (v + 1), "%d 72 110 28" % (x + 10), 17.0 if v == 5 else 20.0, L_CREAM)
-        p.film(lamps, 2, "LAMPE %d" % (v + 1), "%d 78 16 16" % (x + w - 22))
+        p.dark("%d 66 %d 554" % (x, w))
+        p.caption("v%d" % (v + 1), "%d 70 110 30" % (x + 10), 17.0 if v == 5 else 20.0, L_CREAM)
+        p.film(lamps, 2, "LAMPE %d" % (v + 1), "%d 77 16 16" % (x + w - 22))
+        p.button("WAHL %d" % (v + 1), "%d 66 %d 34" % (x, w))
         p.toggle("M %d" % (v + 1), "m", "%d 102 62 30" % (x + 8), 17.0)
         p.toggle("S %d" % (v + 1), "s", "%d 102 62 30" % (x + 75), 17.0)
-        p.lcd("%d 140 129 30" % (x + 8), dead)
-        p.value("ORDNERTEXT %d" % (v + 1), "%d 140 119 30" % (x + 14), 14.0, ink)
-        p.lcd("%d 176 129 30" % (x + 8), dead and dead + 1)
-        p.value("SAMPLETEXT %d" % (v + 1), "%d 176 119 30" % (x + 14), 15.0, ink)
-        p.button("WAHL %d" % (v + 1), "%d 140 129 66" % (x + 8))
-        p.lcd("%d 212 129 24" % (x + 8), dead and dead + 2)
+        p.key("VOICE PREV %d" % (v + 1), GREY, "lt", "%d 140 62 52" % (x + 8), 26.0, L_KEYINK)
+        p.key("VOICE NEXT %d" % (v + 1), GREY, "gt", "%d 140 62 52" % (x + 75), 26.0, L_KEYINK)
+        p.lcd("%d 200 129 24" % (x + 8), dead and dead + 2)
         cells = img.drum_cells(bool(dead))
         for j in range(16):
-            p.film(cells, 3, "ZELLE %d %d" % (v + 1, j + 1), "%d 215 6 18" % (x + 11 + int(round(j * 7.9))))
-        p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 244 72 72" % (x + 36), ring)
-        p.value("RINGTEXT %d" % (v + 1), "%d 266 52 28" % (x + 46), 15.0, L_CREAM, CENTRED)
+            p.film(cells, 3, "ZELLE %d %d" % (v + 1, j + 1), "%d 203 6 18" % (x + 11 + int(round(j * 7.9))))
+        # the value first, the ring on top of it: its see-through middle shows the value, a tap reaches the knob
+        p.value("RINGTEXT %d" % (v + 1), "%d 260 60 30" % (x + 42), 17.0, L_CREAM, CENTRED)
+        p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 226 100 100" % (x + 22), ring)
         # what RANDOM does (tap = the next kind)
-        p.lcd("%d 322 62 26" % (x + 8), dead)
-        p.value("KIND %s" % VOICE_NAMES[v], "%d 322 62 26" % (x + 8), 12.0, ink, CENTRED)
-        p.button("KIND TAP %d" % (v + 1), "%d 322 62 26" % (x + 8))
+        p.lcd("%d 334 62 26" % (x + 8), dead)
+        p.value("KIND %s" % VOICE_NAMES[v], "%d 334 62 26" % (x + 8), 12.0, ink, CENTRED)
+        p.button("KIND TAP %d" % (v + 1), "%d 334 62 26" % (x + 8))
         # HOLD | LIVE: grey = HOLD (the roll stays), red = LIVE (every pass rolls again); the text is the value
-        hb = "%d 322 62 26" % (x + 75)
+        hb = "%d 334 62 26" % (x + 75)
         p.film(img.state(1, 2, 62, 26), 2, "LIVE %s" % VOICE_NAMES[v], hb)
         p.value("LIVE %s" % VOICE_NAMES[v], hb, 15.0, L_WHITE, CENTRED)
         p.button("LIVE %s" % VOICE_NAMES[v], hb, 1, 1)
         # two function slots: the name field (tap = next function), a bigger knob, its value beside it
         for k in range(2):
-            y = 358 + k * 96
-            fb = "%d %d 129 38" % (x + 8, y)
+            y = 370 + k * 122
+            fb = "%d %d 129 30" % (x + 8, y)
             p.lcd(fb, dead)
-            p.value("FUNCTION %d %d" % (v + 1, k + 1), fb, 17.0, ink, CENTRED)
+            p.value("FUNCTION %d %d" % (v + 1, k + 1), fb, 16.0, ink, CENTRED)
             p.button("FUNKTIONSWAHL %d %d" % (v + 1, k + 1), fb)
-            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 52 52" % (x + 12, y + 42), small)
-            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 76 52" % (x + 66, y + 42), 16.0, L_CREAM, CENTRED)
-        p.film(pad, 2, "PADLICHT %d" % (v + 1), "%d 558 145 62" % x)
-        p.caption("p%d" % (v + 1), "%d 560 40 24" % (x + 8), 15.0, L_PAD)
-        p.button("PAD %d" % (v + 1), "%d 558 145 62" % x)
+            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 60 60" % (x + 8, y + 38), small)
+            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 70 60" % (x + 70, y + 38), 16.0, L_CREAM, CENTRED)
 
 
 def schlag_main_funcs(p):

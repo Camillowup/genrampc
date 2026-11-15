@@ -10,7 +10,7 @@ On the MPC, GENRA is two plugins:
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
 | **GENRA CHOP** 0.9 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** 0.9 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
+| **GENRA SCHLAG** 0.10 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
 GENRA CHOP sends every lane as MIDI on its own channel (see MIDI OUT). Both plugins play on the MPC's transport:
@@ -73,8 +73,9 @@ press Play / Stop on the MPC. Every panel, page and message is in English.
 
 In the MPC's plugin list as **GENRA SCHLAG** (next to GENRA CHOP); on its pages it says SCHLAG.
 
-- **SCHLAG**: 8 voices (KICK, SNARE, CLAP, RIM, CL HAT, OP HAT, TOM, PERC), each with M / S, folder and sample on
-  grey displays (CLAP and TOM have dying displays, on purpose), its 16 steps, the endless **RANDOM** ring (every turn
+- **SCHLAG**: 8 voices (KICK, SNARE, CLAP, RIM, CL HAT, OP HAT, TOM, PERC), each with M / S, **< >** (the previous /
+  next sample of the voice's folder, at once; it plays once and its name shows in the header), its 16 steps on a grey
+  display (TOM's is dying, on purpose), the endless **RANDOM** ring (its value inside the ring; every turn
   sets the share of the voice's hits RANDOM picks; HOLD keeps the roll, LIVE rolls every pass; the number in the
   ring is the amount; Q-Links 1-8; LEVEL on Q-Links 9-16). **The field under the ring = what RANDOM does** to the hits
   it picks (tap = the next kind): **SAMPLE** another sample of the voice's folder, **POOL** any sample of all eight
@@ -86,8 +87,8 @@ In the MPC's plugin list as **GENRA SCHLAG** (next to GENRA CHOP); on its pages 
   **GENRA | TRACK** (the switch in the header and on STEPS, earlier AUTO | PADS): GENRA = SCHLAG plays GENRA CHOP's
   pattern; TRACK = SCHLAG plays only the notes of its own MPC track (pads played or recorded into the grid) and
   GENRA CHOP sends no drums on MIDI channel 10, so a recorded sequence does not play twice. After PRINT it is TRACK.
-  Tap a voice's folder / sample field to choose the voice: the FOLDER page then opens its folder (switch pages with
-  the MPC's function keys).
+  Tap a voice's **name** to choose it: the FOLDER page then opens its folder (switch pages with the MPC's function
+  keys). No pads on the screen: play the voices on the MPC's pads.
   - **Press SCHLAG's function key again**: the same page with the Q-Links on the function slots (Q-Links 1-8 = the
     upper slot of each voice, 9-16 = the lower one); the header says `Q-LINKS: FUNCTIONS`. Press again = RANDOM and
     LEVEL. The Q-Links outside the plugin (program mode) stay on RANDOM and LEVEL.
@@ -144,6 +145,9 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA SCHLAG 0.10: the new main page (< > per voice, the name tap, RANDOM 100 with its value inside, bigger knobs,
+  no pads): do < > step through the folder and does a tap on the ring turn it?
 
 - GENRA SCHLAG 0.9 / GENRA CHOP 0.9: HIT OFF on GENRA's hits; CLEAR ALL (and UNDO on GENRA CHOP); GENRA | TRACK
   (does GENRA CHOP stop channel 10 in TRACK, does SCHLAG play the recorded track?); EMPTY; the Kits folder, LOAD KIT
