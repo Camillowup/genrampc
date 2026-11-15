@@ -81,6 +81,7 @@ enum
 {
     P_PITCH = 0, P_DECAY, P_FILTER, P_LEVEL,
     P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH, P_REC,
+    P_BASSOCT,                         // BASS OCT: -1 / 0 / +1 / +2 octaves on the bass line (at once)
     P_LANEMODE0,                       // per lane: DRUMS KIT/BREAK/BOTH, BASS FOLLOW.., MELODY STAB.., PADS SUSTAIN..
     P_DENS0 = P_LANEMODE0 + kLanes,    // per lane: DENSITY 0..100 % (50 = the style)
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
@@ -88,7 +89,7 @@ enum
     P_UNDO = P_NEW0 + kLanes, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
     P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR,
     P_MODEPREV0, P_MODENEXT0 = P_MODEPREV0 + kLanes,
-    P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_SCROLL,
+    P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_OCTTAP, P_SCROLL,
     P_ROWTAP0,
     P_SLOTTAP0 = P_ROWTAP0 + kRows,
     // texts
@@ -230,6 +231,7 @@ public:
         addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
         addParam(choiceParam("length", "LENGTH", {"Auto", "1 bar", "2 bars", "4 bars", "8 bars"}, 0));
         addParam(boolParam("rec", "REC", false));
+        addParam(choiceParam("bassoct", "BASS OCT", {"OCT -1", "OCT 0", "OCT +1", "OCT +2"}, 1));
         addParam(choiceParam("drummode", "DRUM MODE", {hh::DRUM_MODES, hh::DRUM_MODES + 3}, 0));
         addParam(choiceParam("bassmode", "BASS MODE", {hh::BASS_MODES, hh::BASS_MODES + 4}, 0));
         addParam(choiceParam("melmode", "MELODY MODE", {hh::MEL_MODES, hh::MEL_MODES + 4}, 0));
@@ -251,6 +253,7 @@ public:
             for (int k = 0; k < kLanes; ++k) addButton((std::string(d) + " " + std::to_string(k + 1)).c_str());
         addButton("REV");
         addButton("LOCK");
+        addButton("OCT TAP");
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int i = 0; i < kRows; ++i) addButton(("TIPP " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
@@ -720,7 +723,8 @@ private:
             for (int v = 0; v < hh::PAD_VOICES; ++v)
                 if (p.pitch[v] >= 0) queueMidi(t, t + std::max(0.5f, p.len) * spStep * 0.98, kChPads, p.pitch[v], p.vel);
         }
-        for (int d = 0; d < hh::DRUMS; ++d)
+        const bool drumsOff = drumsMuted_.load(std::memory_order_relaxed); // SCHLAG in TRACK: its track plays the drums
+        for (int d = 0; d < hh::DRUMS && !drumsOff; ++d)
         {
             const hh::Hit& h = q.drum[d][s];
             if (h.vel <= 0.f || !plays(h.chance, h.cond, 110u + (uint32_t)d)) continue;
@@ -1008,6 +1012,7 @@ private:
         set_.key = info_.key;
         set_.keyAuto = true;
         seed_ = seed_ * 1664525u + 1013904223u;
+        if (track < 0) for (bool& e : pat_.edited) e = false; // NEW ALL: every lane new, hand-edited ones too
         hh::generate(pat_, track, set_, info_, padSet_, seed_, track >= 0, bpmNow());
         if (track < 0) ++loopId_;
         publishLoop();
@@ -1072,7 +1077,8 @@ private:
         };
         for (int i = 0; i < kSteps; ++i)
         {
-            l.bass[i] = note(pat_.bass[i]); // the base (the base line)
+            l.bass[i] = note(pat_.bass[i]); // the base (the base line), with BASS OCT
+            if (l.bass[i].pitch >= 0) l.bass[i].pitch = (int8_t)clamp(l.bass[i].pitch + 12 * knobs_.bassOct, 0, 127);
             if (rend_.bass[i].pitch < 0 && pat_.bass[i].pitch >= 0) l.bass[i].prio = 255;
             l.mel[i] = note(rend_.mel[i]);
             for (int v = 0; v < 4; ++v) l.pad[i][v] = rend_.pad[i].pitch[v];
@@ -1294,7 +1300,7 @@ private:
             else if (k == 2) n += rend_.mel[s].pitch >= 0;
             else n += rend_.pad[s].pitch[0] >= 0;
         }
-        if (k == 0) return std::to_string(n) + " hits" + (linked ? " · SCHLAG" : "");
+        if (k == 0) return std::to_string(n) + " hits" + (linked ? (drumsMuted_.load() ? " · SCHLAG TRACK" : " · SCHLAG") : "");
         std::string t = std::to_string(n) + (k == 3 ? " chords ·" : " notes ·");
         for (int b = 0; b < hh::BARS; ++b)
         {
@@ -1321,6 +1327,7 @@ private:
             if (L)
             {
                 on = laneAlive_[k].check(L->lane[k].beat.load(), nowMs());
+                if (k == 0) drumsMuted_.store(on && L->drumsTrack.load() == 1, std::memory_order_relaxed);
                 if (on) { name = genralink::Link::readName(L->lane[k]); if (name.empty()) name = "linked"; }
                 uint32_t rq = L->lane[k].newRequest.load(), uq = L->lane[k].undoRequest.load();
                 if (!laneReqInit_[k]) { laneReq_[k] = rq; laneUndoReq_[k] = uq; laneReqInit_[k] = true; }
@@ -1458,19 +1465,31 @@ private:
         if (w - editR_ > (uint32_t)genralink::LinkData::kEdits) editR_ = w - genralink::LinkData::kEdits;
         undoPat_ = pat_;
         hasUndo_ = true;
+        // the first edit takes the drums as they play (DENSITY applied): hits DENSITY hid stay away, and HIT OFF
+        // finds every hit SCHLAG shows
+        if (!pat_.edited[hh::T_DRUMS])
+            for (int v = 0; v < hh::DRUMS; ++v)
+                for (int s = 0; s < kSteps; ++s) pat_.drum[v][s] = rend_.drum[v][s];
+        bool cleared = false;
         for (; editR_ != w; ++editR_)
         {
             int c = L->editCmd[editR_ % genralink::LinkData::kEdits].load(std::memory_order_relaxed);
             int v = c & 15, st = (c >> 4) & 255;
             bool on = (c >> 12) & 1;
+            if (v == genralink::kEditClearAll)
+            {
+                for (int d = 0; d < hh::DRUMS; ++d) for (int s = 0; s < kSteps; ++s) pat_.drum[d][s] = hh::Hit();
+                cleared = true;
+                continue;
+            }
             if (v >= hh::DRUMS || st >= kSteps) continue;
             hh::Hit& h = pat_.drum[v][st];
             if (on) { h = hh::Hit(); h.vel = 0.85f; h.prio = 0.f; }
-            else h.vel = 0.f;
+            else h = hh::Hit();
         }
         pat_.edited[hh::T_DRUMS] = true;
         publishLoop(true);
-        screen_.message(P_STATUS, "SCHLAG: drum step edited (NEW DRUMS rolls again)", 3000);
+        screen_.message(P_STATUS, cleared ? "SCHLAG: CLEAR ALL (UNDO = back)" : "SCHLAG: drum step edited (NEW DRUMS rolls again)", 3000);
     }
 
     // REC (worker): the pad hits go into the chop lane, on the nearest 16th, overdubbing pass by pass
@@ -1511,6 +1530,7 @@ private:
         {
             const int p = t.first;
             if (p == P_NEWALL) { regenerate(-1); screen_.message(P_STATUS, "NEW ALL: new loop at the end of the pattern"); }
+            else if (p == P_OCTTAP) setParam(P_BASSOCT, (float)((getInt(P_BASSOCT) + 1) % 4));
             else if (p >= P_NEW0 && p < P_NEW0 + kLanes) newLane(p - P_NEW0);
             else if (p == P_UNDO)
             {
@@ -1607,6 +1627,15 @@ private:
                 if (pathRequest_) { want = requestedPath_; pathRequest_ = false; wantLoad = true; wasRestored = restored_; }
             }
             if (resyncReq_.exchange(false)) screen_.resync();
+            {
+                int o = clamp(getInt(P_BASSOCT), 0, 3) - 1;
+                if (o != knobs_.bassOct)
+                {
+                    knobs_.bassOct = o;
+                    if (octSeen_) { publishLoop(true); screen_.message(P_STATUS, "BASS OCT " + std::string(o > 0 ? "+" : "") + std::to_string(o)); }
+                }
+                octSeen_ = true;
+            }
             if (wantLoad)
             {
                 if (!want.empty() && loadPath(want)) cutAndPublish(true);
@@ -1737,6 +1766,8 @@ private:
     bool pathRequest_ = false, restored_ = false;
     bool restoredLock_[hh::PADS] = {};
     hh::Pattern savedPattern_, restoredPattern_;
+    bool octSeen_ = false;                 // BASS OCT: the worker has taken the parameter once
+    std::atomic<bool> drumsMuted_{false};  // SCHLAG in TRACK: no drums on MIDI channel 10
 };
 
 MPC_PLUGIN_ENTRY(GenraChop)

@@ -43,7 +43,7 @@ using namespace genrafiles;
 namespace {
 
 static const int kVoices = 8, kSlots = 2, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
-static const int kMaxFiles = 128, kFlashes = 19;
+static const int kMaxFiles = 128, kFlashes = 22;
 static const size_t kMaxVoiceBytes = 16u << 20; // the samples of one voice: at most 16 MB in memory
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
@@ -63,14 +63,14 @@ static const int NUM_CONDS = 8;
 const char* const kCondNames[NUM_CONDS] = {"—", "1st of 2", "2nd of 2", "1st of 4", "2nd of 4", "3rd of 4", "4th of 4", "not 1st"};
 
 static const char* const kCaptions[][2] = {
-    {"schlag", "SCHLAG"}, {"auto", "AUTO"}, {"padsmode", "PADS"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
+    {"schlag", "SCHLAG"}, {"auto", "GENRA"}, {"padsmode", "TRACK"}, {"undo", "UNDO"}, {"basic", "BASIC"}, {"new", "NEW"},
     {"m", "M"}, {"s", "S"}, {"v1", "KICK"}, {"v2", "SNARE"}, {"v3", "CLAP"}, {"v4", "RIM"}, {"v5", "CL HAT"},
     {"v6", "OP HAT"}, {"v7", "TOM"}, {"v8", "PERC"}, {"p1", "1"}, {"p2", "2"}, {"p3", "3"}, {"p4", "4"},
     {"p5", "5"}, {"p6", "6"}, {"p7", "7"}, {"p8", "8"}, {"ordner", "· FOLDER"}, {"back", "BACK"},
     {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"}, {"root", "ROOT HERE"},
     {"hint1", "1st tap = listen"}, {"hint2", "2nd tap = the voice's sample"}, {"print", "PRINT"},
-    {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
-    {"padsinfo", "PADS: only the track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
+    {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "GENRA: GENRA's loop plays"},
+    {"padsinfo", "TRACK: only the track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
     {"help2", "pads 1 to 16 in order"}, {"help3", "(pad 1 = bottom left)"},
     {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
     {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
@@ -81,7 +81,7 @@ static const char* const kCaptions[][2] = {
     {"lk6", "PAN"}, {"lk7", "REVERSE"}, {"lk8", "FILTER"}, {"qlfuncs", "Q-LINKS: FUNCTIONS"},
     {"steph1", "tap a step to set its own values"}, {"steph2", "— = the main page's value"}, {"lk9", "LEVEL"},
     {"lk10", "CHANCE"}, {"smpcap", "SAMPLE"}, {"condcap", "CONDITION"}, {"hit1", "HIT"}, {"hit2", "ON / OFF"},
-    {"lt", "<"}, {"gt", ">"}};
+    {"lt", "<"}, {"gt", ">"}, {"clearall", "CLEAR ALL"}, {"empty", "EMPTY"}, {"loadkit", "LOAD KIT"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -101,7 +101,7 @@ enum
     P_SLK0,                               // STEPS: the selected step's RANDOM + 8 functions (knobs)
     // buttons
     P_NEW = P_SLK0 + kLocks, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
-    P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT,  // flashes 0..18
+    P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT, P_CLEARALL, P_EMPTY, P_LOADKIT,  // flashes 0..21
     P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
@@ -145,6 +145,9 @@ struct Kit
     std::vector<Sample> samples;
     int base = 0;
 };
+
+// a voice set to EMPTY keeps this as its folder (in projects and kits)
+static const char* const kEmptyFolder = "<empty>";
 
 struct Kit;
 struct Player
@@ -195,6 +198,8 @@ Sample synth(int voice, float sr)
 
 class Schlag : public Plugin
 {
+    struct KitInfo { std::string folder, file; int count = 0; }; // what a voice has loaded (worker)
+
 public:
     Schlag() : Plugin(makeInfo()), screen_(*this)
     {
@@ -217,7 +222,7 @@ public:
                 addParam(q);
             }
         addParam(floatParam("volume", "VOLUME", -40.f, 6.f, 0.f, "dB", 1));
-        addParam(choiceParam("auto", "AUTO PADS", {"Auto", "Pads"}, 0));
+        addParam(choiceParam("auto", "AUTO PADS", {"GENRA", "TRACK"}, 0));
         addParam(boolParam("choke", "HAT CHOKE", true));
         addParam(choiceParam("voice", "VOICE", {"KICK", "SNARE", "CLAP", "RIM", "CL HAT", "OP HAT", "TOM", "PERC"}, 0));
         addParam(boolParam("kitnotes", "MPC KIT NOTES", false));
@@ -236,7 +241,7 @@ public:
             addParam(q);
         }
         for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP",
-                              "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT"})
+                              "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -279,7 +284,7 @@ public:
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.8 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.9 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -375,7 +380,11 @@ public:
             previewPos_ = 0.0;
         }
         genralink::LinkData* L = link_.data();
-        if (L) L->lane[genralink::LANE_DRUMS].beat.fetch_add(1, std::memory_order_relaxed);
+        if (L)
+        {
+            L->lane[genralink::LANE_DRUMS].beat.fetch_add(1, std::memory_order_relaxed);
+            L->drumsTrack.store(getInt(P_AUTO) == 1 ? 1 : 0, std::memory_order_relaxed); // TRACK: GENRA CHOP sends no drums
+        }
         // the loop that plays: a new one from GENRA CHOP takes over at the end of the pattern (or at once when stopped)
         const Transport& tr0 = ctx.transport;
         const bool playing0 = tr0.valid && tr0.playing && tr0.ppqValid;
@@ -965,21 +974,48 @@ private:
             used += (k->samples.back().L.size() + k->samples.back().R.size()) * 2;
         }
         if (k->samples.empty()) { delete k; return false; }
+        installKit(v, k, {folder, stripWav(files[(size_t)baseIdx]), (int)k->samples.size()}, folder, files[(size_t)baseIdx]);
+        return true;
+    }
+
+    // a voice's new kit goes to the audio thread; the texts and the state follow it
+    void installKit(int v, Kit* k, const KitInfo& info, const std::string& folder, const std::string& file)
+    {
         for (auto& r : retired_[v]) delete r.exchange(nullptr);
         delete pendingKit_[v].exchange(k, std::memory_order_acq_rel);
         size_t bytes = 0;
         for (const Sample& s : k->samples) bytes += (s.L.size() + s.R.size()) * 2;
-        kitInfo_[v] = {folder, stripWav(files[(size_t)baseIdx]), (int)k->samples.size()};
+        kitInfo_[v] = info;
         kitBytes_[v] = bytes;
         std::lock_guard<std::mutex> g(mtx_);
         voiceFolder_[v] = folder;
-        voiceFile_[v] = files[(size_t)baseIdx];
-        return true;
+        voiceFile_[v] = file;
+    }
+
+    // the built-in sound (folder "")
+    void builtInVoice(int v)
+    {
+        Kit* k = new Kit();
+        k->samples.push_back(synth(v, (float)(sr_ > 0.0 ? sr_ : 44100.0)));
+        installKit(v, k, {std::string(), "built in", 1}, std::string(), std::string());
+    }
+
+    // EMPTY: no sample, the voice stays silent (a short silence, so nothing else changes)
+    void emptyVoice(int v)
+    {
+        Kit* k = new Kit();
+        Sample s;
+        s.rate = (float)(sr_ > 0.0 ? sr_ : 44100.0);
+        s.name = "EMPTY";
+        s.L.assign(64, 0);
+        k->samples.push_back(s);
+        installKit(v, k, {kEmptyFolder, "—", 0}, kEmptyFolder, std::string());
     }
 
     std::string folderLabel(const std::string& f) const
     {
         if (f.empty()) return "built in";
+        if (f == kEmptyFolder) return "EMPTY";
         if (!root_.empty() && f.compare(0, root_.size(), root_) == 0 && f.size() > root_.size()) return f.substr(root_.size() + 1);
         return baseName(f);
     }
@@ -1050,6 +1086,14 @@ private:
             if (!voiceFolder_[v].empty() && isDir(voiceFolder_[v])) return voiceFolder_[v];
         }
         return !root_.empty() && isDir(root_) ? root_ : std::string();
+    }
+    // the kits' own folder: <root folder>/Kits (made when needed); empty without a root folder
+    std::string kitsDir()
+    {
+        if (root_.empty() || !isDir(root_)) return std::string();
+        std::string d = root_ + "/Kits";
+        if (!isDir(d)) ::mkdir(d.c_str(), 0777);
+        return isDir(d) ? d : std::string();
     }
     static std::string freeName(const std::string& dir, const std::string& stem, const char* ext)
     {
@@ -1132,8 +1176,10 @@ private:
     // a kit: every voice's folder and sample, RANDOM, LEVEL and its four functions
     void saveKit()
     {
-        std::string dir = saveDir(clamp(getInt(P_VOICE), 0, kVoices - 1));
-        if (dir.empty()) { screen_.message(P_LISTINFO, "open a folder first"); return; }
+        std::string dir = kitsDir();
+        const bool own = !dir.empty();
+        if (!own) dir = saveDir(clamp(getInt(P_VOICE), 0, kVoices - 1)); // no root folder: where it was before
+        if (dir.empty()) { screen_.message(P_LISTINFO, "set ROOT HERE for a Kits folder", 4000); return; }
         std::string t = "SGK2\n"; // per voice: folder, file, RANDOM, LEVEL, the 2 slots' functions, every function's value
         {
             std::lock_guard<std::mutex> g(mtx_);
@@ -1160,7 +1206,7 @@ private:
         if (writeFileBytes(dir + "/" + f, t.data(), t.size()))
         {
             if (browser_.cwd() == dir) browser_.list(dir + "/" + f);
-            screen_.message(P_LISTINFO, "saved: " + f.substr(0, f.size() - 4), 4000);
+            screen_.message(P_LISTINFO, (own ? "saved in Kits: " : "saved (no ROOT): ") + f.substr(0, f.size() - 4), 4000);
         }
         else screen_.message(P_LISTINFO, "Error while writing");
     }
@@ -1190,12 +1236,12 @@ private:
             size_t a = 0;
             for (;;) { size_t b = line.find('\t', a); c.push_back(line.substr(a, b == std::string::npos ? std::string::npos : b - a)); if (b == std::string::npos) break; a = b + 1; }
             if (c.size() < (v1 ? 12u : (size_t)(4 + kSlots + NUM_FUNCS))) continue;
-            if (!c[0].empty() && !isDir(c[0])) ++missing;
+            if (!c[0].empty() && c[0] != kEmptyFolder && !isDir(c[0])) ++missing;
             {
                 std::lock_guard<std::mutex> g(mtx_);
-                voiceFolder_[v] = c[0];
+                voiceFolder_[v] = c[0];   // "" = built in, kEmptyFolder = EMPTY: the worker sets those too
                 voiceFile_[v] = c[1];
-                loadReq_[v] = !c[0].empty();
+                loadReq_[v] = true;
             }
             setParam(P_RANDOM0 + v, (float)std::atof(c[2].c_str()));
             setParam(P_LEVEL0 + v, (float)std::atof(c[3].c_str()));
@@ -1220,7 +1266,18 @@ private:
         syncSlots(true);
         std::string name = baseName(path);
         name = name.substr(0, name.size() - 4);
-        screen_.message(P_LISTINFO, missing ? name + ": " + std::to_string(missing) + " folders missing" : name + " loaded", 4000);
+        loadName_ = missing ? name + ": " + std::to_string(missing) + " folders missing" : name + " loaded";
+        screen_.message(P_LISTINFO, "KIT: loading " + name + " ...", 4000);
+    }
+
+    // LOAD KIT: the list shows the Kits folder
+    void openKits()
+    {
+        std::string d = kitsDir();
+        if (d.empty()) { screen_.message(P_LISTINFO, "set ROOT HERE for a Kits folder", 4000); return; }
+        browser_.open(d);
+        previewPath_.clear();
+        screen_.message(P_LISTINFO, "Kits: tap a kit to load it", 3000);
     }
 
     // ------------------------------------------------------------------ worker: screen
@@ -1259,7 +1316,7 @@ private:
         for (int r = 0; r < kRows; ++r) screen_.setText(P_ROWT0 + r, browser_.rowText(r, loaded, previewPath_));
         std::snprintf(b, sizeof b, "Drums · 4 bars · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the track's notes");
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "GENRA: GENRA's loop plays" : "TRACK: only the track's notes");
         screen_.setText(P_LEARNINFO, pads_.learning() ? pads_.info() : (pads_.learned() ? "learned" : "not learned yet"));
         screen_.setText(P_MAPINFO, pads_.info());
         screen_.setText(P_ROOTTXT, root_.empty() ? std::string("none yet (FOLDER: ROOT HERE)") : pathLabel(root_), true);
@@ -1269,7 +1326,7 @@ private:
         std::snprintf(b, sizeof b, "%.1f MB samples loaded", bytes / 1048576.0);
         screen_.setText(P_MEMINFO, b);
         int step = curStep_.load();
-        screen_.setText(P_STATUS, step >= 0 ? "Bar " + std::to_string(step / 16 + 1) + " / 4" : std::string(getInt(P_AUTO) == 0 ? "AUTO" : "PADS"));
+        screen_.setText(P_STATUS, step >= 0 ? "Bar " + std::to_string(step / 16 + 1) + " / 4" : std::string(getInt(P_AUTO) == 0 ? "GENRA" : "TRACK"));
     }
 
     // ------------------------------------------------------------------ worker: STEPS
@@ -1444,7 +1501,7 @@ private:
         {
             set(P_AUTO, 1.f);
             notifyHostParameterChanged(P_AUTO);
-            screen_.message(P_PRINTSTATUS, std::string(name) + " saved, now PADS", 4000);
+            screen_.message(P_PRINTSTATUS, std::string(name) + " saved, now TRACK", 4000);
         }
         else screen_.message(P_PRINTSTATUS, "Error while writing");
         printList();
@@ -1485,15 +1542,35 @@ private:
         {
             genralink::LinkData* L = link_.data();
             if (resyncReq_.exchange(false)) screen_.resync();
-            for (int v = 0; v < kVoices; ++v)
+            // kits and projects: one voice per look, so the screen shows how far it is ("KIT: loading 3/8")
             {
-                bool want = false;
+                int pending = 0, v = -1;
                 std::string folder, file;
                 {
                     std::lock_guard<std::mutex> g(mtx_);
-                    if (loadReq_[v]) { want = true; loadReq_[v] = false; folder = voiceFolder_[v]; file = voiceFile_[v]; }
+                    for (int i = 0; i < kVoices; ++i) if (loadReq_[i]) { if (v < 0) v = i; ++pending; }
+                    if (v >= 0) { loadReq_[v] = false; folder = voiceFolder_[v]; file = voiceFile_[v]; }
                 }
-                if (want && !folder.empty() && !loadVoice(v, folder, file)) screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": folder missing");
+                if (v >= 0)
+                {
+                    if (!loadTotal_) loadTotal_ = pending;
+                    char b[64];
+                    std::snprintf(b, sizeof b, "KIT: loading %d/%d · %s", loadTotal_ - pending + 1, loadTotal_, kVoiceNames[v]);
+                    screen_.message(P_STATUS, b, 3000);
+                    screen_.message(P_LISTINFO, b, 3000);
+                    texts(L, linkAlive_);
+                    screen_.push();
+                    if (folder == kEmptyFolder) emptyVoice(v);
+                    else if (folder.empty()) builtInVoice(v);
+                    else if (!loadVoice(v, folder, file)) { screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": folder missing", 4000); ++loadMissing_; }
+                    if (pending == 1)
+                    {
+                        std::string done = !loadName_.empty() ? loadName_ : loadMissing_ ? std::to_string(loadMissing_) + " folders missing" : "samples loaded";
+                        screen_.message(P_STATUS, "KIT: " + done, 4000);
+                        screen_.message(P_LISTINFO, "KIT: " + done, 4000);
+                        loadTotal_ = 0; loadMissing_ = 0; loadName_.clear();
+                    }
+                }
             }
             bool on = L && alive.check(L->writerBeat.load(), nowMs());
             linkAlive_ = on;
@@ -1612,6 +1689,7 @@ private:
                     // HIT ON / OFF: the step goes to GENRA CHOP's drum pattern (MIDI channel 10, PRINT, SCHLAG)
                     genralink::LinkData* Ld = link_.data();
                     if (stepSel_ < 0) screen_.message(P_STATUS, "tap a step first", 2500);
+                    else if (getInt(P_AUTO) == 1) screen_.message(P_STATUS, "TRACK: edit in the MPC grid", 3500);
                     else if (!Ld || !linkAlive_) screen_.message(P_STATUS, "HIT: needs GENRA CHOP (LINK)", 3000);
                     else
                     {
@@ -1623,6 +1701,32 @@ private:
                         screen_.message(P_STATUS, on ? "HIT ON: sent to GENRA CHOP" : "HIT OFF: sent to GENRA CHOP", 2500);
                     }
                 }
+                else if (p == P_CLEARALL)
+                {
+                    // CLEAR ALL: every step's own values, and (with GENRA CHOP) every drum hit; UNDO there brings them back
+                    for (auto& a : lock_) for (auto& b : a) for (auto& c : b) c.store(std::numeric_limits<float>::quiet_NaN());
+                    for (auto& a : smpLock_) for (auto& b : a) b.store(-1);
+                    for (auto& a : condLock_) for (auto& b : a) b.store(0);
+                    syncLocks(true);
+                    genralink::LinkData* Ld = link_.data();
+                    if (Ld && linkAlive_)
+                    {
+                        uint32_t w = Ld->editW.load();
+                        Ld->editCmd[w % genralink::LinkData::kEdits].store(genralink::kEditClearAll);
+                        Ld->editW.store(w + 1, std::memory_order_release);
+                        screen_.message(P_STATUS, getInt(P_AUTO) == 1 ? "CLEAR ALL (TRACK: erase on MPC)" : "CLEAR ALL: UNDO in GENRA CHOP", 4000);
+                    }
+                    else screen_.message(P_STATUS, "CLEAR ALL: values (no CHOP)", 4000);
+                }
+                else if (p == P_EMPTY)
+                {
+                    int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
+                    emptyVoice(v);
+                    screen_.message(P_LISTINFO, std::string(kVoiceNames[v]) + ": EMPTY (silent)", 3000);
+                }
+                else if (p == P_LOADKIT) openKits();
+                else if (p == P_AUTO)
+                    screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "GENRA: GENRA's loop plays" : "TRACK: only the track's notes", 3500);
                 else if (p == P_LEARN) pads_.startLearning();
                 else if (p == P_BACK) { browser_.up(); previewPath_.clear(); }
                 else if (p == P_DRVBTN) { browser_.drives(); previewPath_.clear(); }
@@ -1651,7 +1755,7 @@ private:
                         std::lock_guard<std::mutex> g(mtx_);
                         f = voiceFolder_[v];
                     }
-                    if (!f.empty()) browser_.open(f);
+                    if (!f.empty() && isDir(f)) browser_.open(f);
                     screen_.message(P_STATUS, std::string(kVoiceNames[v]) + " chosen: page FOLDER");
                 }
                 else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
@@ -1687,7 +1791,6 @@ private:
         }
     }
 
-    struct KitInfo { std::string folder, file; int count = 0; };
 
     genraui::Screen screen_;
     genralink::Link link_;
@@ -1748,6 +1851,8 @@ private:
     std::mutex mtx_;
     std::string voiceFolder_[kVoices], voiceFile_[kVoices];
     bool loadReq_[kVoices] = {};
+    int loadTotal_ = 0, loadMissing_ = 0;  // worker: the voices of this kit / project load, the folders missing
+    std::string loadName_;                 // worker: what to say when the kit is in
 };
 
 MPC_PLUGIN_ENTRY(Schlag)

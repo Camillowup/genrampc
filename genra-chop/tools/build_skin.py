@@ -508,7 +508,13 @@ def chop_page(p):
     modes = ("DRUM MODE", "BASS MODE", "MELODY MODE", "PADS MODE")
     for k, cap in enumerate(("drums", "bass", "mel", "pads")):
         y = 294 + k * 76
-        p.caption(cap, "32 %d 160 30" % (y + 2), 20.0, L_CREAM)
+        if k == 1:  # BASS: OCT -1 / 0 / +1 / +2 beside the name (light grey like the other keys, tap = next)
+            p.caption(cap, "32 %d 64 30" % (y + 2), 20.0, L_CREAM)
+            p.image(p.img.box(GREY, 92, 28), "100 %d 92 28" % (y + 3))
+            p.value("BASS OCT", "100 %d 92 28" % (y + 3), 15.0, L_KEYINK, CENTRED)
+            p.button("OCT TAP", "100 %d 92 28" % (y + 3))
+        else:
+            p.caption(cap, "32 %d 160 30" % (y + 2), 20.0, L_CREAM)
         p.value("SPURTEXT %d" % (k + 1), "32 %d 160 26" % (y + 34), 13.0, L_CREAM_MUTED)
         p.key("MODE BACK %d" % (k + 1), GREY, "prev", "196 %d 34 56" % (y + 3), 22.0, L_KEYINK)
         p.lcd("234 %d 108 56" % (y + 3))
@@ -621,7 +627,7 @@ def chop_setup(p):
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
                 "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP", "SAMPLE BACK", "SAMPLE NEXT",
-                "CONDITION BACK", "CONDITION NEXT", "HIT"]
+                "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT"]
 DEAD_VOICES = {6: 4}  # TOM: a dying display (value: the damage pattern)
 
 
@@ -698,23 +704,29 @@ def schlag_steps(p):
     """STEPS: GENRA's drum pattern, 8 voices x 16 steps of a bar; tap a step to give it its own values."""
     img = p.img
     schlag_header(p)
-    p.caption("stepstitle", "180 8 220 48", 24.0, L_MUTED)
-    p.radio("BAR", ("bar1", "bar2", "bar3", "bar4"), (420, 532, 644, 756), 10, 104, 44, 18.0)
-    p.lcd("880 10 380 44")
-    p.value("STEPPOS", "892 10 360 44", 17.0, L_LCD)
-    cells, head = img.step_cells(64, 44), img.play_head(68, 398)
+    p.caption("stepstitle", "180 8 150 48", 24.0, L_MUTED)
+    p.radio("BAR", ("bar1", "bar2", "bar3", "bar4"), (340, 440, 540, 640), 10, 96, 44, 18.0)
+    p.key("CLEAR ALL", RED, "clearall", "752 10 130 44", 17.0)
+    p.radio("AUTO PADS", ("auto", "padsmode"), (896, 986), 10, 86, 44, 17.0)  # GENRA | TRACK (= the main page's)
+    p.lcd("1084 10 176 44")
+    p.value("STEPPOS", "1090 10 166 44", 15.0, L_LCD)
+    # 16 steps in 4 groups of 4: a wider gap with a line between the groups
+    sx = lambda j: 132 + j * 68 + (j // 4) * 12
+    cells, head = img.step_cells(62, 44), img.play_head(66, 398)
+    for g in (1, 2, 3):
+        p.box(KEY_OFF, "%d 66 4 394" % (sx(4 * g) - 9), 0)
     for v in range(8):
         y = 66 + v * 50
         p.dark("20 %d 104 44" % y)
         p.caption("v%d" % (v + 1), "30 %d 94 44" % y, 15.0, L_CREAM)
         for j in range(16):
-            p.film(cells, 144, "SCHRITT %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, y))
+            p.film(cells, 144, "SCHRITT %d %d" % (v + 1, j + 1), "%d %d 62 44" % (sx(j), y))
     for j in range(16):
-        p.film(head, 2, "KOPFSPALTE %d" % (j + 1), "%d 64 68 398" % (130 + j * 70))
+        p.film(head, 2, "KOPFSPALTE %d" % (j + 1), "%d 64 66 398" % (sx(j) - 2))
     for v in range(8):
         p.button("LANE TAP %d" % (v + 1), "20 %d 104 44" % (66 + v * 50))  # the name: the whole lane in the editor
         for j in range(16):
-            p.button("STEP TAP %d %d" % (v + 1, j + 1), "%d %d 64 44" % (132 + j * 70, 66 + v * 50))
+            p.button("STEP TAP %d %d" % (v + 1, j + 1), "%d %d 62 44" % (sx(j), 66 + v * 50))
     y = 474
     p.dark("20 %d 1240 146" % y)
     p.value("STEPKOPF", "34 %d 210 28" % (y + 4), 16.0, L_CREAM)
@@ -765,11 +777,13 @@ def schlag_folder(p):
     p.key("FOLDER UP", RED, "back", "640 230 200 70", 24.0)
     p.key("DRIVES", KEY_OFF, "drives", "850 230 200 70", 22.0)
     p.key("ROOT HERE", KEY_OFF, "root", "1060 230 200 70", 20.0)
-    p.key("LOAD SAMPLE", RED, "loadsmp", "640 310 620 80", 28.0)
+    p.key("LOAD SAMPLE", RED, "loadsmp", "640 310 410 80", 28.0)
+    p.key("EMPTY", KEY_OFF, "empty", "1060 310 200 80", 24.0)
     p.value("LISTINFO", "640 410 620 50", 18.0, L_MUTED, CENTRED)
     p.key("SAVE SAMPLE", KEY_OFF, "savesmp", "640 476 160 104", 17.0)
     p.control("LIST", "811 474 278 107")
-    p.key("SAVE KIT", KEY_OFF, "savekit", "1100 476 160 104", 17.0)
+    p.key("SAVE KIT", KEY_OFF, "savekit", "1100 476 160 50", 17.0)
+    p.key("LOAD KIT", RED, "loadkit", "1100 530 160 50", 17.0)
 
 
 def schlag_print(p):
@@ -844,6 +858,7 @@ def main():
                  ("STYLE", chop_style, []), ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
         choices = {"BANK": ["A", "B", "C", "D"], "VIEW": ["Sample", "Loop", "Chop"],
                    "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"],
+                   "BASS OCT": ["OCT -1", "OCT 0", "OCT +1", "OCT +2"],
                    "LENGTH": ["Auto", "1 bar", "2 bars", "4 bars", "8 bars"],
                    "REC": ["Off", "On"], "DRUM MODE": ["KIT", "BREAK", "BOTH"],
                    "BASS MODE": ["FOLLOW", "ROOT+5", "WALK", "808"], "MELODY MODE": ["STAB", "LEAD", "ARP", "RIFF"],
@@ -860,7 +875,7 @@ def main():
         pages = (("SCHLAG", schlag_main, [], 0, 0), ("SCHLAG", schlag_main_funcs, [], 0, 1),
                  ("FOLDER", schlag_folder, ["801 466 298 123"], 1, 0), ("STEPS", schlag_steps, [], 2, 0),
                  ("PRINT", schlag_print, [], 3, 0), ("SETUP", schlag_setup, [], 4, 0))
-        choices = {"AUTO PADS": ["Auto", "Pads"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
+        choices = {"AUTO PADS": ["GENRA", "TRACK"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
         q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
         q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
         qf = {v + 1: idx["VALUE %d 1" % (v + 1)] for v in range(8)}

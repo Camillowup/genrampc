@@ -118,8 +118,12 @@ struct LinkData
     // written by GENRA SCHLAG (STEPS, HIT ON / OFF): drum edits for GENRA CHOP, a small ring
     static const int kEdits = 16;
     std::atomic<uint32_t> editW;                // +1 per edit
-    std::atomic<int32_t>  editCmd[kEdits];      // voice | step << 4 | on << 12
+    std::atomic<int32_t>  editCmd[kEdits];      // voice | step << 4 | on << 12; voice 15 = CLEAR ALL (every drum hit)
+    // written by GENRA SCHLAG (added at the end): 1 = TRACK (SCHLAG plays only its MPC track's notes), so GENRA CHOP
+    // sends no drums on MIDI channel 10 while SCHLAG is alive
+    std::atomic<int32_t>  drumsTrack;
 };
+static const int kEditClearAll = 15;
 
 class Link
 {
