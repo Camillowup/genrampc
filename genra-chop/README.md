@@ -30,6 +30,46 @@ press Play / Stop on the MPC. Every panel, page and message is in English.
 - **Knobs**: double tap (or Enter) opens the MPC's large knob editor.
 - Keys flash when tapped; long texts end in `~`.
 
+## Set up on the MPC (quick start)
+
+**1. Install.** Copy both folders (`Genra - VST - GENRA CHOP`, `Genra - VST - GENRA SCHLAG`) from the build
+artifact `genra-mpc` into `VST2 Plugins/` on the drive (e.g. the internal SSD). Preferences › Enhancements (Beta) ›
+Enable Enhancements and External Plugin Support on, then restart the MPC.
+
+**2. Two tracks.**
+
+| Track | Plugin | What it does |
+|---|---|---|
+| 1 | **GENRA CHOP** | the chef: sample, chops, the loop, MIDI OUT of every lane |
+| 2 | **GENRA SCHLAG** | the drums (8 sampled voices) |
+
+**3. LINK (no cables).** The two plugins find each other by themselves (LINK). It works when the DRUMS lane on
+GENRA CHOP shows `· SCHLAG` and its lamp is lit, and SCHLAG's header shows `LINK GENRA CHOP · <tempo> BPM`.
+Press Play on the MPC: both play GENRA's loop. SCHLAG on **GENRA** (header switch) = it plays GENRA's drums.
+
+**4. More instruments over MIDI (bass, melody, chords, other drums).** GENRA CHOP sends every lane on its own
+MIDI port **GENRA CHOP OUT**, one channel per lane:
+
+| Channel | Lane |
+|---|---|
+| 1 | chops |
+| 2 | bass (OCT beside BASS shifts it) |
+| 3 | melody |
+| 4 | pads / chords |
+| 10 | drums (MPC drum-program notes, pads A01-A08) |
+
+For every track that should play a lane (a keygroup, a plugin, a drum program):
+- **MIDI input** (Track View): **GENRA CHOP OUT**, **channel** = the lane's (not All).
+- **Monitor: MERGE** (Menu › Track View). With AUTO the track only hears the port while it is selected; MERGE: it
+  always hears it and also plays what it recorded.
+- Preferences › MIDI/Sync: the port GENRA CHOP OUT needs only **TRACK** on.
+- Never set GENRA CHOP's own track to GENRA CHOP OUT.
+
+**5. Record into sequences.** Arm the tracks, press Record: the lanes land in the MPC sequence (Sequence 1). Then
+NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on. To play the recorded sequences back, stop GENRA
+playing along: tracks on MIDI from GENRA CHOP: Monitor OFF (or GENRA CHOP on PADS); SCHLAG on **TRACK** (it then
+plays only its own track's notes, and GENRA CHOP sends no drums on channel 10).
+
 ## GENRA CHOP (instrument, e.g. track 1)
 
 - **BROWSER**: path, nine rows (folder: open; WAV: 1st tap = preview), **LOAD SAMPLE** (or a 2nd tap) loads it,
