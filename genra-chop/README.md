@@ -9,7 +9,7 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.15 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA CHOP** 0.16 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
 | **GENRA SCHLAG** 0.14 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
@@ -89,8 +89,8 @@ NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on.
     **SPARSE** (one or two chops a bar, room for rap). Each style has its own chop rhythms, and the chops follow the
     style's chord progression (per bar the chop whose chord fits; styles that pitch tune it to fit). PAT acts with
     **NEW** (the row's own: only the chops, and the bass and pads that lean on them) or NEW ALL. **GRID** (the knob
-    beside PAT): AUTO and **1/16** = the chops as the style rolls them; **1/4** / **1/8** = calmer: per quarter /
-    eighth one chop, by chance a second half a cell later, no rolls. It acts on the running pattern at its end (no NEW
+    beside PAT): AUTO and **1/16** = the chops as the style rolls them; **1 BAR** / **1/2** / **1/4** / **1/8** =
+    calmer: per bar / half bar / quarter / eighth one chop (4 bars: 4 / 8 / 16 / 32 at most), by chance a second half a cell later, no rolls. It acts on the running pattern at its end (no NEW
     needed); back to AUTO brings the rolled chops back. Chops are cut on the zero crossing right before the attack, fade in over 3 ms and out over 5 ms (also when
     the next chop cuts them off).
   - **Q-Links on CHOP**: 1 PITCH, 2 DECAY, 3 FILTER, 4 LEVEL, 5 STYLE, 6 CHOPS, 7 VOLUME, 8 PAT, 9-12 DENSITY and
@@ -111,6 +111,8 @@ NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on.
     builds bass, melody and pads (and drums, if the lane is empty) to your chops at once; your chops stay as played,
     UNDO brings the accompaniment before back. A lane's NEW rolls it again, still following your chops.
   - **Your own chops**: CLEAR, PADS, REC, Play and play the chops; REC off = GENRA plays the accompaniment.
+    In **PADS** GENRA also records along while the **MPC records** (Record / Overdub, no REC in the plugin needed):
+    the MPC's Stop or Record off = the accompaniment comes.
 - **STYLE**: all 29 styles as keys, one column per decade (80s, 90s, 2000s, 2010s, 2020s). A tap rolls a new loop
   in that style; it starts at the end of the pattern. The header shows the style, decade and tempo; NEW ALL,
   < STYLE / STYLE >, and **LENGTH AUTO / 1 / 2 / 4 / 8 bars**: AUTO follows the MPC sequence's loop (1, 2, 3, 4 bars:
@@ -215,6 +217,9 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.16: in PADS, record your chops with the MPC's Record / Overdub only: after Stop, do bass, melody and
+  pads come to your chops? GRID 1 BAR and 1/2 (4 and 8 chops on 4 bars).
 
 - GENRA CHOP 0.15: your own chops with GENRA's accompaniment: CLEAR, PADS, REC + Play, play the chops, REC off.
   Do bass, melody and pads come at once (at the pattern end) and fit your chops? In PADS, do channels 2, 3, 4 and
