@@ -9,8 +9,8 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.10 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** 0.11 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
+| **GENRA CHOP** 0.11 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA SCHLAG** 0.12 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
 GENRA CHOP sends every lane as MIDI on its own channel (see MIDI OUT). Both plugins play on the MPC's transport:
@@ -143,18 +143,20 @@ In the MPC's plugin list as **GENRA SCHLAG** (next to GENRA CHOP); on its pages 
   - **The chosen voice**: tap a voice's name. Its column gets a red frame and a red name; the FOLDER page and the
     Q-Links below follow it.
   - **Press SCHLAG's function key again**: the Q-Links on the chosen voice (the header says `Q-LINKS: SNARE`):
-    1 RANDOM, 2 LEVEL, 3 TUNE, 4 DECAY, 5 DRIVE, 6 BITS, 7 REPEAT, 8 PAN, 9 REVERSE, 10 FILTER. Tap another name:
+    from top to bottom like the column: 1 SAMPLE (steps through the folder like < >, the name in the header),
+    2 RANDOM, 3 the upper function slot, 4 the lower function slot (the function chosen there), 5 LEVEL. Tap another name:
     the Q-Links follow it at once. Press again = RANDOM and LEVEL of all eight voices. The Q-Links outside the plugin
     (program mode) stay on RANDOM and LEVEL.
 - **STEPS**: GENRA's drum pattern, 8 voices x 16 steps of a bar (BAR 1-4), the play head in red. Bright = loud,
   grey = soft; a red bar left / right = GENRA plays the hit early / late; a red dot = the step has its own values, a
   red line under it = its own RANDOM, a blue square = its own sample. Tap a step: the editor below is for **this
   one hit only** (the other hits and voices stay):
-  - **SAMPLE < >**: its own sample from the voice's folder (it plays once when chosen; `—` = the voice's sample;
-    RANDOM does not swap it), **CONDITION < >**: 1st / 2nd of 2, 1st-4th of 4, not 1st (the pass of the loop).
-  - Knobs (Q-Links 1-11): RANDOM (a chance that this hit is picked), **LEVEL**, **CHANCE** (how often it plays),
-    TUNE, DECAY, DRIVE, BITS, REPEAT, PAN, REVERSE, FILTER. `—` = the main page's value; turning a knob gives the
-    step its own value. CLEAR STEP takes them all back.
+  - **Two knobs** (Q-Links 1 and 2), each with a field whose **< >** choose what it sets: **SAMPLE** (its own
+    sample from the voice's folder, it plays once when chosen; `—` = the voice's sample; RANDOM does not swap it),
+    **CONDITION** (1st / 2nd of 2, 1st-4th of 4, not 1st: the pass of the loop), **LEVEL**, **CHANCE** (how often it
+    plays), RANDOM (a chance that this hit is picked), TUNE, DECAY, DRIVE, BITS, REPEAT, PAN, REVERSE, FILTER. The
+    value stands beside the knob; `—` = the main page's value; turning the knob gives the step its own value. CLEAR
+    STEP takes them all back.
   - **HIT ON / OFF**: switches the hit on or off **in GENRA CHOP's drum pattern** (over LINK): it plays at once, goes
     to MIDI OUT channel 10 and PRINT. The first edit takes the drums as they play (hits DENSITY hid stay away). NEW
     DRUMS or NEW ALL roll the drums again, UNDO on GENRA CHOP takes the edit back. Needs GENRA CHOP. In TRACK: edit
@@ -202,6 +204,10 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.11 / GENRA SCHLAG 0.12: NEW in the CHOPS row (now built like the other NEW keys, it flashes), the
+  count-in (GENRA stays silent until the one), the version on CHOP's SETUP page, SCHLAG's Q-Links (SAMPLE, RANDOM,
+  upper, lower, LEVEL) and the two knobs on STEPS.
 
 - GENRA CHOP 0.10 / GENRA SCHLAG 0.11: PAT (does each kind sound different, AUTO per style?), the drum grooves,
   NEW CHOPS; the chosen voice (red frame) and the Q-Links following it; recording the drums into SCHLAG's track on

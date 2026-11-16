@@ -477,7 +477,7 @@ def print_page(p, title_x, has_dir_buttons):
 
 
 # ------------------------------------------------------------------ GENRA CHOP
-CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "UNDO", "SAVE WAV", "CHOPS MINUS",
+CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "NEW CHOPS", "UNDO", "SAVE WAV", "CHOPS MINUS",
               "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK", "DRIVES", "PAGE BACK",
               "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR",
               "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4",
@@ -637,7 +637,7 @@ def chop_setup(p):
     for i in range(4):
         p.caption("help%d" % (i + 1), "20 %d 400 34" % (238 + i * 34), 22.0, L_MUTED)
     rows = (("r1", "BELEGUNG"), ("r2", "LAUFWERKSLISTE"), ("r3", "SCHREIBEN"), ("r4", "LINKINFO"),
-            ("r5", "ANALYSE"), ("r6", "SPEICHERORT"), ("r7", "HOSTINFO"))
+            ("r5", "ANALYSE"), ("r6", "SPEICHERORT"), ("r7", "HOSTINFO"), ("r8", "VERSION"))
     for i, (key, param) in enumerate(rows):
         y = 20 + i * 70
         p.dark("450 %d 810 60" % y)
@@ -648,7 +648,8 @@ def chop_setup(p):
 # ------------------------------------------------------------------ SCHLAG
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
                 "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP", "SAMPLE BACK", "SAMPLE NEXT",
-                "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT"]
+                "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT",
+                "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2"]
 DEAD_VOICES = {6: 4}  # TOM: a dying display (value: the damage pattern)
 
 
@@ -751,28 +752,18 @@ def schlag_steps(p):
             p.button("STEP TAP %d %d" % (v + 1, j + 1), "%d %d 62 44" % (sx(j), 66 + v * 50))
     y = 474
     p.dark("20 %d 1240 146" % y)
-    p.value("STEPKOPF", "34 %d 210 28" % (y + 4), 16.0, L_CREAM)
-    # a step's own sample (from the voice's folder) and CONDITION
-    p.caption("smpcap", "34 %d 196 16" % (y + 34), 11.0, L_MUTED)
-    p.key("SAMPLE BACK", GREY, "lt", "34 %d 30 34" % (y + 52), 18.0, L_KEYINK)
-    p.lcd("68 %d 128 34" % (y + 52))
-    p.value("STEPSAMPLE", "70 %d 124 34" % (y + 52), 13.0, L_LCD, CENTRED)
-    p.key("SAMPLE NEXT", GREY, "gt", "200 %d 30 34" % (y + 52), 18.0, L_KEYINK)
-    p.caption("condcap", "34 %d 196 16" % (y + 90), 11.0, L_MUTED)
-    p.key("CONDITION BACK", GREY, "lt", "34 %d 30 32" % (y + 108), 18.0, L_KEYINK)
-    p.lcd("68 %d 128 32" % (y + 108))
-    p.value("STEPCOND", "70 %d 124 32" % (y + 108), 13.0, L_LCD, CENTRED)
-    p.key("CONDITION NEXT", GREY, "gt", "200 %d 30 32" % (y + 108), 18.0, L_KEYINK)
-    knob = img.knob(44)
-    names = ["RANDOM", "LEVEL", "CHANCE", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"]
-    lk = {"RANDOM": 0, "LEVEL": 9, "CHANCE": 10}
-    for i, n in enumerate(names):
-        cx = 290 + i * 80
-        k = lk.get(n, ["TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"].index(n) + 1 if n not in lk else 0)
-        p.lcd("%d %d 74 22" % (cx - 37, y + 10))
-        p.caption("lk%d" % k, "%d %d 74 22" % (cx - 37, y + 10), 10.0, L_LCD, CENTRED)
-        p.knob_only("STEP %s" % n, "%d %d 44 44" % (cx - 22, y + 48), knob)
-        p.value("STEPWERT %d" % (k + 1), "%d %d 80 26" % (cx - 40, y + 105), 13.0, L_CREAM, CENTRED)
+    p.value("STEPKOPF", "34 %d 400 28" % (y + 4), 16.0, L_CREAM)
+    # 0.12: two knobs, each with a field whose < > choose what it sets for the step (like the main page's slots):
+    # SAMPLE, CONDITION, LEVEL, CHANCE, RANDOM, TUNE .. FILTER; its value beside the knob
+    knob = img.knob(52)
+    for k, kx in enumerate((60, 470)):
+        n = k + 1
+        p.key("FN BACK %d" % n, GREY, "lt", "%d %d 40 40" % (kx, y + 40), 20.0, L_KEYINK)
+        p.lcd("%d %d 220 40" % (kx + 46, y + 40))
+        p.value("STEPFN %d" % n, "%d %d 220 40" % (kx + 46, y + 40), 18.0, L_LCD, CENTRED)
+        p.key("FN NEXT %d" % n, GREY, "gt", "%d %d 40 40" % (kx + 272, y + 40), 20.0, L_KEYINK)
+        p.knob_only("STEP KNOB %d" % n, "%d %d 52 52" % (kx + 14, y + 86), knob)
+        p.value("STEPFNWERT %d" % n, "%d %d 230 40" % (kx + 80, y + 92), 17.0, L_CREAM)
     p.key("HIT", RED, "hit1", "1150 %d 100 57" % (y + 13), 15.0)
     p.caption("hit2", "1150 %d 100 20" % (y + 44), 12.0, L_WHITE, CENTRED)
     p.key("CLEAR STEP", GREY, "clearstep", "1150 %d 100 57" % (y + 76), 14.0, L_KEYINK)
@@ -901,11 +892,9 @@ def main():
         choices = {"AUTO PADS": ["GENRA", "TRACK"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
         q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
         q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
-        # Q-LINKS: FUNCTIONS: the chosen voice's RANDOM, LEVEL and its 8 functions (stand-ins in the plugin)
-        qf = {i + 1: idx["Q %s" % n] for i, n in enumerate(
-            ["RANDOM", "LEVEL", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
-        qs = {i + 1: idx["STEP %s" % n] for i, n in enumerate(
-            ["RANDOM", "LEVEL", "CHANCE", "TUNE", "DECAY", "DRIVE", "BITS", "REPEAT", "PAN", "REVERSE", "FILTER"])}
+        # Q-LINKS: FUNCTIONS: the chosen voice's column: SAMPLE, RANDOM, upper + lower slot, LEVEL (stand-ins)
+        qf = {i + 1: idx["Q %s" % n] for i, n in enumerate(["SAMPLE", "RANDOM", "UPPER", "LOWER", "LEVEL"])}
+        qs = {1: idx["STEP KNOB 1"], 2: idx["STEP KNOB 2"]}  # STEPS: the two knobs
         screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))
                   for key, sub, a in ((0, 0, q), (0, 1, qf), (1, 0, {13: idx["LIST"]}), (2, 0, qs), (3, 0, {}),
                                       (4, 0, {}))]
