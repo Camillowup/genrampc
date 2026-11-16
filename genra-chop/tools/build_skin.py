@@ -893,7 +893,7 @@ def main():
                    "LENGTH": ["Auto", "1 bar", "2 bars", "4 bars", "8 bars"],
                    "REC": ["Off", "On"], "DRUM MODE": ["STYLE", "HALF", "DOUBLE", "LAID BACK", "DRUNK", "MINIMAL"],
                    "BASS MODE": ["FOLLOW", "ROOT+5", "WALK", "808"], "MELODY MODE": ["STAB", "LEAD", "ARP", "RIFF"],
-                   "PADS MODE": ["SUSTAIN", "STAB", "SWELL"], "GRID": ["AUTO", "1/4", "1/8", "1/16"]}
+                   "PADS MODE": ["SUSTAIN", "STAB", "SWELL"], "GRID": ["AUTO", "1 BAR", "1/2", "1/4", "1/8", "1/16"]}
         # CHOP: row 3 DENSITY, row 4 MODE of the four lanes (each lane one column); 8 PAT. The 2nd press of CHOP: GRID,
         # PAT, BASS OCT, LENGTH, VIEW, BANK, MODE (Transient / Equal), rows 3 and 4 as on the first set
         lanes = {9: idx["DENS DRUMS"], 10: idx["DENS BASS"], 11: idx["DENS MELODY"], 12: idx["DENS PADS"],

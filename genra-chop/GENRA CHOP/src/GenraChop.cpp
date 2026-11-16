@@ -239,7 +239,7 @@ public:
         addParam(boolParam("rec", "REC", false));
         addParam(choiceParam("bassoct", "BASS OCT", {"OCT -1", "OCT 0", "OCT +1", "OCT +2"}, 1));
         addParam(choiceParam("choppat", "CHOP PAT", {hh::CHOP_PAT_NAMES, hh::CHOP_PAT_NAMES + hh::NUM_CHOP_PATS}, 0));
-        addParam(choiceParam("chopgrid", "GRID", {"AUTO", "1/4", "1/8", "1/16"}, 0));
+        addParam(choiceParam("chopgrid", "GRID", {"AUTO", "1 BAR", "1/2", "1/4", "1/8", "1/16"}, 0));
         addParam(choiceParam("drummode", "DRUM MODE", {hh::GROOVE_NAMES, hh::GROOVE_NAMES + hh::NUM_GROOVES}, 0)); // the groove (2.7.0)
         addParam(choiceParam("bassmode", "BASS MODE", {hh::BASS_MODES, hh::BASS_MODES + 4}, 0));
         addParam(choiceParam("melmode", "MELODY MODE", {hh::MEL_MODES, hh::MEL_MODES + 4}, 0));
@@ -300,7 +300,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.15 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.16 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -493,10 +493,13 @@ public:
 
         const double spStep = sr_ * 60.0 / bpm / 4.0;
         // REC: armed + playing; the first bar after the start (or after arming) is the count-in
-        const bool recOn = getBool(P_REC);
+        // 0.16: in PADS GENRA records along while the MPC records (Record / Overdub), no count-in of its own
+        const bool mpcRec = !autoMode && tr.recording;
+        const bool recOn = getBool(P_REC) || mpcRec;
         const double recQ0 = playing ? tr.ppqPos * 4.0 : 0.0;
         if (recOn && playing && (!recWas_ || !wasPlaying_))
-            recFrom_ = std::ceil(recQ0 / hh::STEPS - 1e-6) * hh::STEPS + hh::STEPS;
+            recFrom_ = mpcRec ? std::floor(recQ0 + 1e-6) - 0.25
+                              : std::ceil(recQ0 / hh::STEPS - 1e-6) * hh::STEPS + hh::STEPS;
         recWas_ = recOn && playing;
         const bool recording = recOn && playing;
         recState_.store(!recOn ? 0 : !playing ? 1 : recQ0 < recFrom_ - 0.5 ? 2 : 3, std::memory_order_relaxed);
@@ -1064,9 +1067,10 @@ private:
     // no timing offsets. Acts on the running pattern (from its end, like an edit); back to AUTO = the chops as rolled.
     void applyChopGrid(hh::Pattern& p) const
     {
-        const int g = getInt(P_CHOPGRID);
-        if (g != 1 && g != 2) return;
-        const int cell = g == 1 ? 4 : 2;
+        // 0.16: AUTO, 1 BAR, 1/2, 1/4, 1/8, 1/16 - cells of 16, 8, 4, 2 steps; AUTO and 1/16 = as rolled
+        static const int kCell[6] = {0, 16, 8, 4, 2, 0};
+        const int cell = kCell[clamp(getInt(P_CHOPGRID), 0, 5)];
+        if (cell == 0) return;
         hh::ChopEv out[hh::LEN];
         for (int c0 = 0; c0 < hh::LEN; c0 += cell)
         {
@@ -1107,8 +1111,8 @@ private:
         for (int s = 0; s < hh::LEN; ++s) pat_.chop[s] = chopRaw_[s];
         applyChopGrid(pat_);
         publishLoop();
-        static const char* names[4] = {"AUTO", "1/4", "1/8", "1/16"};
-        screen_.message(P_STATUS, std::string("GRID ") + names[clamp(getInt(P_CHOPGRID), 0, 3)] + ": at the pattern end", 2500);
+        static const char* names[6] = {"AUTO", "1 BAR", "1/2", "1/4", "1/8", "1/16"};
+        screen_.message(P_STATUS, std::string("GRID ") + names[clamp(getInt(P_CHOPGRID), 0, 5)] + ": at the pattern end", 2500);
     }
 
     void regenerate(int track, bool keepUndo = true)
@@ -1785,7 +1789,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.15 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.16 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }
