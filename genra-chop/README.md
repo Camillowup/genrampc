@@ -9,7 +9,7 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.14 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA CHOP** 0.15 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
 | **GENRA SCHLAG** 0.14 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
@@ -24,8 +24,8 @@ press Play / Stop on the MPC. Every panel, page and message is in English.
   - `PRINT/`: the printed MIDI files (see PRINT).
   - `<plugin>.txt`: each plugin's settings (last folder, save folder, print folder).
 - **PRINT page**: **PRINT** writes the loop of this plugin as a MIDI file (`Print NN Chop|Drums Key BPM.mid`,
-  4 bars). After PRINT the plugin switches to **PADS**: the loop no longer plays by itself. **AUTO | PADS** switches
-  by hand. With MIDI OUT you can also record the loop straight into a MIDI track.
+  4 bars). After PRINT the plugin switches to **PADS**: the chop pattern no longer plays by itself, the pads play the
+  chops; bass, melody, pads and drums go on (also on MIDI OUT). **AUTO | PADS** switches by hand. With MIDI OUT you can also record the loop straight into a MIDI track.
 - **A new loop starts at the end of the pattern**: NEW ALL, NEW per lane, a new STYLE. Stopped, it changes at once.
 - **Knobs**: double tap (or Enter) opens the MPC's large knob editor.
 - Keys flash when tapped; long texts end in `~`.
@@ -107,8 +107,10 @@ NEW / NEW ALL on GENRA CHOP, Sequence 2, record again, and so on.
     channel 2 and LINK, and is saved with the project.
   - **CLEAR** (only while the MPC stands): every lane empty; UNDO brings the loop back.
   - **REC**: arm it, press Play: one bar of count-in, then the chops you play on the pads go into the chop lane, on
-    the nearest 16th, pass after pass (overdub). UNDO takes back the last pass. REC again = done. A lane's NEW then
-    follows your chops (their chords).
+    the nearest 16th, pass after pass (overdub). UNDO takes back the last pass. REC again (or Stop) = done: GENRA
+    builds bass, melody and pads (and drums, if the lane is empty) to your chops at once; your chops stay as played,
+    UNDO brings the accompaniment before back. A lane's NEW rolls it again, still following your chops.
+  - **Your own chops**: CLEAR, PADS, REC, Play and play the chops; REC off = GENRA plays the accompaniment.
 - **STYLE**: all 29 styles as keys, one column per decade (80s, 90s, 2000s, 2010s, 2020s). A tap rolls a new loop
   in that style; it starts at the end of the pattern. The header shows the style, decade and tempo; NEW ALL,
   < STYLE / STYLE >, and **LENGTH AUTO / 1 / 2 / 4 / 8 bars**: AUTO follows the MPC sequence's loop (1, 2, 3, 4 bars:
@@ -213,6 +215,10 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.15: your own chops with GENRA's accompaniment: CLEAR, PADS, REC + Play, play the chops, REC off.
+  Do bass, melody and pads come at once (at the pattern end) and fit your chops? In PADS, do channels 2, 3, 4 and
+  the drums keep playing?
 
 - GENRA CHOP / GENRA SCHLAG 0.14: Overdub with count-in: GENRA silent until the one, then the first step right on
   it (the MPC's count-in: PLAY + REC with the position a bar past the bar start, found with DIAG); GRID 1/4 and 1/8

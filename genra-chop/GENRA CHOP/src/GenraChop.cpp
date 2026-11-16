@@ -59,7 +59,7 @@ static const char* const kCaptions[][2] = {
     {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODY"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"}, {"stprev", "< STYLE"}, {"stnext", "STYLE >"},
     {"auto", "AUTO"}, {"padsmode", "PADS"}, {"choke", "CHOKE"}, {"rev", "REV"}, {"lock", "LOCK"},
     {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
-    {"padsinfo", "PADS: only the MPC track's notes"}, {"printhere", "SAVE HERE"}, {"printstd", "STANDARD"},
+    {"padsinfo", "PADS: you play the chops, GENRA the rest"}, {"printhere", "SAVE HERE"}, {"printstd", "STANDARD"},
     {"back", "BACK"}, {"drives", "DRIVES"}, {"pgup", "< PAGE"}, {"pgdn", "PAGE >"},
     {"savehere", "SAVE HERE"}, {"loaded", "Loaded:"}, {"learn", "LEARN"},
     {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
@@ -300,7 +300,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.14 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.15 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -524,10 +524,12 @@ public:
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
                 double at = std::max(0.0, (nextStep_ - q0) * spStep); // a step begun a moment ago: at once
-                if (seq_ && autoMode)
+                if (seq_)
                 {
+                    // 0.15: PADS silences only the chop pattern (the pads play the chops); bass, melody, pads and
+                    // drums go on, also on MIDI OUT
                     const uint32_t pass = (uint32_t)((n - pos) / len);
-                    scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
+                    if (autoMode) scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
                     scheduleMidi(*seq_, s, pass, at, spStep);
                 }
                 nextStep_ += 1.0;
@@ -1125,12 +1127,21 @@ private:
         set_.padMode = clamp(getInt(P_LANEMODE0 + 3), 0, 2);
         // DENSITY: what NEW takes along (a lane's NEW only its own lane's)
         for (int k = 0; k < kLanes; ++k)
-            if (track < 0 || track == k) knobs_.dens[k] = clamp(get(P_DENS0 + k), 0.f, 100.f) / 100.f;
+            if (track < 0 || track == k || (track == hh::T_HARMONY && k > 0))
+                knobs_.dens[k] = clamp(get(P_DENS0 + k), 0.f, 100.f) / 100.f;
         set_.key = info_.key;
         set_.keyAuto = true;
         seed_ = seed_ * 1664525u + 1013904223u;
         if (track < 0) for (bool& e : pat_.edited) e = false; // NEW ALL: every lane new, hand-edited ones too
-        hh::generate(pat_, track, set_, info_, padSet_, seed_, track >= 0, bpmNow());
+        if (track == hh::T_HARMONY) // 0.15 (REC off): the accompaniment to the recorded chops; chops stay as played
+        {
+            for (int t : {hh::T_BASS, hh::T_MEL, hh::T_PAD}) pat_.edited[t] = false;
+            bool drums = false;
+            for (int v = 0; v < hh::DRUMS && !drums; ++v)
+                for (int st = 0; st < hh::LEN; ++st) if (pat_.drum[v][st].vel > 0.f) { drums = true; break; }
+            if (!drums) hh::generate(pat_, hh::T_DRUMS, set_, info_, padSet_, seed_ ^ 0x5eedu, true, bpmNow()); // after CLEAR
+        }
+        hh::generate(pat_, track, set_, info_, padSet_, seed_, track >= 0 && track != hh::T_HARMONY, bpmNow());
         if (track < 0 || track == hh::T_CHOP)
         {
             for (int s = 0; s < hh::LEN; ++s) chopRaw_[s] = pat_.chop[s]; // the chops as rolled (GRID starts from them)
@@ -1550,7 +1561,7 @@ private:
         char b[64];
         std::snprintf(b, sizeof b, "Chop track · 4 bars · %.0f BPM · %s", (double)bpmNow(), keyText().c_str());
         screen_.setText(P_PRINTINFO, b);
-        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
+        screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: you play the chops, GENRA the rest");
     }
 
     void setupTexts()
@@ -1673,6 +1684,15 @@ private:
         auto now = std::chrono::steady_clock::now();
         if (recDirty_ && now - recPublish_ > std::chrono::milliseconds(150)) { recDirty_ = false; recPublish_ = now; publishLoop(); }
         if (recState_.load() == 0) recPass_ = -1;
+        // 0.15: recording over (REC off or the MPC stopped): GENRA builds bass, melody and pads to the chops at once
+        if (recState_.load() == 3) recTook_ = recTook_ || r != recSeen_;
+        else if (recTook_)
+        {
+            recTook_ = false;
+            regenerate(hh::T_HARMONY);
+            screen_.message(P_STATUS, "REC off: bass, melody, pads to your chops (UNDO = back)", 4000);
+        }
+        recSeen_ = r;
     }
 
     // ------------------------------------------------------------------ worker: buttons
@@ -1737,7 +1757,7 @@ private:
                     hasUndo_ = true;
                     pat_.clear();
                     publishLoop();
-                    screen_.message(P_STATUS, "CLEAR: empty. REC + Play, or NEW ALL", 4000);
+                    screen_.message(P_STATUS, "CLEAR: empty. PADS + REC + Play: your chops", 4000);
                 }
             }
             else if (p >= P_MODEPREV0 && p < P_MODENEXT0 + kLanes)
@@ -1765,7 +1785,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.14 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.15 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }
@@ -1780,7 +1800,7 @@ private:
                 if (browser_.cwd().empty() || browser_.cwd() == "*") screen_.message(P_LISTINFO, "open a folder first");
                 else { saveDir_ = browser_.cwd(); settings_.set("savedir", saveDir_); settings_.save(); screen_.message(P_LISTINFO, "Save folder set"); }
             }
-            else if (p == P_AUTO) screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: only the MPC track's notes");
+            else if (p == P_AUTO) screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "AUTO: the loop plays" : "PADS: you play the chops, GENRA the rest");
             else if (p >= P_ROWTAP0 && p < P_ROWTAP0 + kRows) tapRow(p - P_ROWTAP0);
         }
     }
@@ -1883,6 +1903,8 @@ private:
     double recFrom_ = 0.0;                        // audio thread: REC writes from this step on (after the count-in)
     std::atomic<double> recFromShared_{0.0};
     bool recWas_ = false;
+    bool recTook_ = false;                        // worker: hits came in during this recording (0.15)
+    int recSeen_ = 0;
     long recPass_ = -1;                           // worker: the pass being recorded (UNDO takes it back)
     std::chrono::steady_clock::time_point recPublish_{};
     bool recDirty_ = false;
