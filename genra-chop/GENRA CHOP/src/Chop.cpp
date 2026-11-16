@@ -284,6 +284,33 @@ static size_t onAttack(const std::vector<float>& m, size_t at, float sr) {
 	return best;
 }
 
+// 0.12 (MPC): a cut moves to the quietest point (a zero crossing) at most 3 ms before it, never later: no click at the
+// chop's start, and the attack stays whole
+static size_t zeroBefore(const SampleData& d, size_t at) {
+	size_t n = d.frames();
+	if (!n || at == 0)
+		return 0;
+	at = std::min(at, n - 1);
+	size_t win = (size_t) (0.003f * d.sampleRate);
+	size_t a = at > win ? at - win : 0;
+	bool st = d.R.size() == n;
+	size_t best = at;
+	float bestV = 1e9f;
+	float prev = st ? 0.5f * (d.L[at] + d.R[at]) : d.L[at];
+	for (size_t i = at; i + 1 > a; i--) {
+		float v = st ? 0.5f * (d.L[i] + d.R[i]) : d.L[i];
+		if ((v <= 0.f) != (prev <= 0.f)) // a sign change: the zero crossing nearest to the cut
+			return i;
+		float score = std::fabs(v) + 1e-6f * (float) (at - i);
+		if (score < bestV)
+			bestV = score, best = i;
+		prev = v;
+		if (i == 0)
+			break;
+	}
+	return best;
+}
+
 static void cut(ChopSet& cs, const std::vector<float>& m) {
 	size_t total = cs.data.frames();
 	std::vector<size_t> st;
@@ -336,6 +363,8 @@ static void cut(ChopSet& cs, const std::vector<float>& m) {
 			st.insert(st.begin() + best + 1, st[best] + bestLen / 2);
 		}
 	}
+	for (size_t k = 1; k < st.size(); k++) // Transient and Equal: every cut on a zero crossing just before it
+		st[k] = std::max(st[k - 1] + 1, zeroBefore(cs.data, st[k]));
 	cs.info.count = (int) st.size();
 	for (int i = 0; i < PADS; i++) {
 		if (i < cs.info.count) {

@@ -59,9 +59,9 @@ const char* const kRandomKinds[NUM_RKINDS] = {"SAMPLE", "POOL", "PITCH", "GHOST"
 // lock order: 0 RANDOM, 1..8 the functions, 9 LEVEL (dB), 10 CHANCE (%)
 // Q-LINKS: FUNCTIONS (0.12): the chosen voice's column from top to bottom: SAMPLE, RANDOM, the upper and the lower
 // function slot, then LEVEL
-enum QLink { QL_SAMPLE, QL_RANDOM, QL_UPPER, QL_LOWER, QL_LEVEL, NUM_QL };
+enum QLink { QL_SAMPLE, QL_RANDOM, QL_UPPER, QL_LOWER, QL_LEVEL, QL_KIND, NUM_QL }; // Q1-5, Q6 = KIND
 static const int kQL = NUM_QL;
-const char* const kQLNames[NUM_QL] = {"SAMPLE", "RANDOM", "UPPER", "LOWER", "LEVEL"};
+const char* const kQLNames[NUM_QL] = {"SAMPLE", "RANDOM", "UPPER", "LOWER", "LEVEL", "KIND"};
 // STEPS (0.12): two knobs, each with a field whose < > choose what it sets for the step
 enum StepFn { SF_SAMPLE, SF_COND, SF_LEVEL, SF_CHANCE, SF_RANDOM, SF_TUNE, SF_DECAY, SF_DRIVE, SF_BITS, SF_REPEAT, SF_PAN,
               SF_REVERSE, SF_FILTER, NUM_SF };
@@ -93,7 +93,7 @@ static const char* const kCaptions[][2] = {
     {"lk6", "PAN"}, {"lk7", "REVERSE"}, {"lk8", "FILTER"}, {"qlfuncs", "Q-LINKS: FUNCTIONS"},
     {"steph1", "tap a step to set its own values"}, {"steph2", "— = the main page's value"}, {"lk9", "LEVEL"},
     {"lk10", "CHANCE"}, {"smpcap", "SAMPLE"}, {"condcap", "CONDITION"}, {"hit1", "HIT"}, {"hit2", "ON / OFF"},
-    {"lt", "<"}, {"gt", ">"}, {"clearall", "CLEAR ALL"}, {"empty", "EMPTY"}, {"loadkit", "LOAD KIT"}};
+    {"lt", "<"}, {"gt", ">"}, {"qlall", "Q-LINKS: ALL SLOTS 1-8 / 9-16"}, {"clearall", "CLEAR ALL"}, {"empty", "EMPTY"}, {"loadkit", "LOAD KIT"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -271,7 +271,8 @@ public:
             std::string id = "ql_" + n;
             for (char& c : id) c = (char)::tolower((unsigned char)c);
             Param q = i == QL_LEVEL ? floatParam(id.c_str(), ("Q " + n).c_str(), -40.f, 6.f, 0.f, "dB", 1)
-                                    : floatParam(id.c_str(), ("Q " + n).c_str(), 0.f, 100.f, 0.f, "", 0);
+                    : i == QL_KIND ? choiceParam(id.c_str(), ("Q " + n).c_str(), std::vector<std::string>(kRandomKinds, kRandomKinds + NUM_RKINDS), 0)
+                                   : floatParam(id.c_str(), ("Q " + n).c_str(), 0.f, 100.f, 0.f, "", 0);
             q.automatable = false;
             addParam(q);
         }
@@ -342,7 +343,7 @@ public:
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.12 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.13 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -445,8 +446,14 @@ public:
         }
         // the loop that plays: a new one from GENRA CHOP takes over at the end of the pattern (or at once when stopped)
         const Transport& tr0 = ctx.transport;
-        // the MPC's count-in plays positions before the song start: silent until the one (like GENRA CHOP)
-        const bool playing0 = tr0.valid && tr0.playing && tr0.ppqValid && tr0.ppqPos > -0.01;
+        // the MPC's count-in: silent until the one (like GENRA CHOP 0.12: a position before the start, a negative sample
+        // position or a position that stands still while "playing")
+        const bool raw0 = tr0.valid && tr0.playing && tr0.ppqValid;
+        const bool frozen0 = raw0 && rawWas_ && std::fabs(tr0.ppqPos - rawLastQ_) < 1e-9;
+        rawWas_ = raw0;
+        rawLastQ_ = tr0.ppqPos;
+        countIn_ = tr0.ppqPos < -0.01 || tr0.samplePos < -1.0 || frozen0;
+        const bool playing0 = raw0 && !countIn_;
         // a hand edit (STEPS: HIT ON / OFF) is taken at once; a new loop at the end of the pattern
         if (cur_ < 0 || !playing0 || readyNow_.exchange(false)) { int r = ready_.load(std::memory_order_acquire); if (r >= 0) cur_ = r; }
         // STEPS: a sample chosen for a step plays once to listen
@@ -481,7 +488,7 @@ public:
         }
 
         const Transport& tr = ctx.transport;
-        const bool playing = tr.valid && tr.playing && tr.ppqValid && tr.ppqPos > -0.01;
+        const bool playing = tr.valid && tr.playing && tr.ppqValid && !countIn_;
         const bool autoMode = getInt(P_AUTO) == 0;
         const double bpm = tr.tempoValid && tr.bpm > 1.0 ? tr.bpm : 120.0;
         const double spStep = sr_ * 60.0 / bpm / 4.0;
@@ -746,6 +753,7 @@ public:
             }
             else if (i == QL_RANDOM) { std::snprintf(b, sizeof b, "%.0f %%", plain); out = b; }
             else if (i == QL_LEVEL) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; }
+            else if (i == QL_KIND) out = kRandomKinds[clamp((int)std::lround(plain), 0, NUM_RKINDS - 1)];
             else out = valueText(clamp(getInt(P_FUNC0 + v * kSlots + (i - QL_UPPER)), 0, NUM_FUNCS - 1), plain);
             return true;
         }
@@ -1481,6 +1489,7 @@ private:
             case QL_UPPER: return P_VAL0 + v * kSlots;
             case QL_LOWER: return P_VAL0 + v * kSlots + 1;
             case QL_LEVEL: return P_LEVEL0 + v;
+            case QL_KIND: return P_RKIND0 + v;
             default: return -1; // SAMPLE: the kit's sample (no parameter)
         }
     }
@@ -2153,6 +2162,8 @@ private:
     bool loadReq_[kVoices] = {};
     int qlVoice_ = -1;                      // worker: Q-LINKS: FUNCTIONS
     float qlShown_[kQL] = {};
+    bool rawWas_ = false, countIn_ = false;          // audio thread: the count-in (see process)
+    double rawLastQ_ = 0.0;
     int skSel_ = -2, skFn_[kStepKnobs] = {-1, -1};   // worker: STEPS' two knobs
     float skShown_[kStepKnobs] = {};
     bool qlInit_ = false;

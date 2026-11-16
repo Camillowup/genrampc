@@ -64,7 +64,7 @@ static const char* const kCaptions[][2] = {
     {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
     {"help3", "(pad 1 = bottom left)"}, {"help4", "Used by every GENRA plugin"},
     {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
-    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
+    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
     {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
     {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"}};
@@ -83,6 +83,7 @@ enum
     P_VOLUME, P_STYLE, P_MODE, P_CHOPS, P_BANK, P_VIEW, P_CHOKE, P_AUTO, P_LENGTH, P_REC,
     P_BASSOCT,                         // BASS OCT: -1 / 0 / +1 / +2 octaves on the bass line (at once)
     P_CHOPPAT,                         // PAT: the chop pattern's kind (AUTO, ORDER, STABS ...), acts with NEW (CHOPS / ALL)
+    P_CHOPGRID,                        // GRID: AUTO (the style) or the chops on 1/4, 1/8, 1/16 (acts with NEW, like PAT)
     P_LANEMODE0,                       // per lane: DRUMS KIT/BREAK/BOTH, BASS FOLLOW.., MELODY STAB.., PADS SUSTAIN..
     P_DENS0 = P_LANEMODE0 + kLanes,    // per lane: DENSITY 0..100 % (50 = the style)
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
@@ -117,8 +118,9 @@ enum
 };
 
 static const int kVoices = 12;
-static const int kFadeIn = 32;
+static const int kFadeIn = 132;   // 0.12: about 3 ms (was 0.7 ms: clicks at the chop start)
 static const int kFadeOut = 96;
+static const int kChokeFade = 220; // 0.12: a choked chop fades over about 5 ms (was 1 ms)
 
 struct Voice
 {
@@ -132,6 +134,7 @@ struct Voice
     float zl1 = 0.f, zl2 = 0.f, zr1 = 0.f, zr2 = 0.f;
     int age = 0;
     int release = -1;
+    int relLen = kFadeOut;  // the fade-out of this release (a choke fades longer)
 };
 
 struct Trig { double at; int chop; float vel; int pitch; bool rev; double gate; };
@@ -235,6 +238,7 @@ public:
         addParam(boolParam("rec", "REC", false));
         addParam(choiceParam("bassoct", "BASS OCT", {"OCT -1", "OCT 0", "OCT +1", "OCT +2"}, 1));
         addParam(choiceParam("choppat", "CHOP PAT", {hh::CHOP_PAT_NAMES, hh::CHOP_PAT_NAMES + hh::NUM_CHOP_PATS}, 0));
+        addParam(choiceParam("chopgrid", "GRID", {"AUTO", "1/4", "1/8", "1/16"}, 0));
         addParam(choiceParam("drummode", "DRUM MODE", {hh::GROOVE_NAMES, hh::GROOVE_NAMES + hh::NUM_GROOVES}, 0)); // the groove (2.7.0)
         addParam(choiceParam("bassmode", "BASS MODE", {hh::BASS_MODES, hh::BASS_MODES + 4}, 0));
         addParam(choiceParam("melmode", "MELODY MODE", {hh::MEL_MODES, hh::MEL_MODES + 4}, 0));
@@ -295,7 +299,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.11 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.12 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -397,8 +401,38 @@ public:
 
         const Transport& tr = ctx.transport;
         const bool autoMode = getInt(P_AUTO) == 0;
-        // the MPC's count-in (Overdub / Rec) plays positions before the song start: stay silent until the one
-        const bool playing = tr.valid && tr.playing && tr.ppqValid && tr.ppqPos > -0.01;
+        // the MPC's count-in (Overdub / Rec): stay silent until the one. 0.12: how the MPC reports it is unknown, so
+        // three signs count: a position before the start, a negative sample position, a position that stands still
+        // while "playing". What the MPC reports at each start is measured for the SETUP page (row MPC).
+        const bool rawPlay = tr.valid && tr.playing && tr.ppqValid;
+        if (rawPlay && !diagWas_)
+        {
+            diagQ0_.store(tr.ppqPos, std::memory_order_relaxed);
+            diagS0_.store(tr.samplePos, std::memory_order_relaxed);
+            diagRec_.store(tr.recording ? 1 : 0, std::memory_order_relaxed);
+            diagJumpFrom_.store(-1.0, std::memory_order_relaxed);
+            diagJumpTo_.store(-1.0, std::memory_order_relaxed);
+            diagFrozen_.store(0, std::memory_order_relaxed);
+            diagBlocks_ = 0;
+            diagCount_.fetch_add(1, std::memory_order_relaxed);
+        }
+        bool frozen = false;
+        if (rawPlay && diagWas_)
+        {
+            frozen = std::fabs(tr.ppqPos - diagLastQ_) < 1e-9;
+            if (frozen) diagFrozen_.fetch_add(1, std::memory_order_relaxed);
+            if (tr.ppqPos < diagLastQ_ - 0.25 && diagJumpFrom_.load(std::memory_order_relaxed) < 0.0 && diagBlocks_ < 4000)
+            {
+                diagJumpFrom_.store(diagLastQ_, std::memory_order_relaxed);
+                diagJumpTo_.store(tr.ppqPos, std::memory_order_relaxed);
+            }
+            ++diagBlocks_;
+        }
+        if (rawPlay && tr.recording) diagRec_.store(diagRec_.load(std::memory_order_relaxed) | 2, std::memory_order_relaxed);
+        diagWas_ = rawPlay;
+        diagLastQ_ = tr.ppqPos;
+        const bool countIn = tr.ppqPos < -0.01 || tr.samplePos < -1.0 || frozen;
+        const bool playing = rawPlay && !countIn;
         if (!playing || !seq_) swapSeq();
         hostCycling_.store(tr.cycling, std::memory_order_relaxed);
         hostCycle_[0].store(tr.cycleStartPpq, std::memory_order_relaxed);
@@ -770,7 +804,7 @@ private:
         lastPlayed_.store(chop, std::memory_order_relaxed);
         const bool choke = getBool(P_CHOKE);
         for (Voice& v : voices_)
-            if (v.active && v.release < 0 && (choke || v.chop == chop)) v.release = kFadeOut / 2;
+            if (v.active && v.release < 0 && (choke || v.chop == chop)) { v.release = kChokeFade; v.relLen = kChokeFade; }
         Voice* slot = nullptr;
         for (Voice& v : voices_) if (!v.active) { slot = &v; break; }
         if (!slot)
@@ -797,6 +831,7 @@ private:
         v.zl1 = v.zl2 = v.zr1 = v.zr2 = 0.f;
         v.age = 0;
         v.release = -1;
+        v.relLen = kFadeOut;
         if (genralink::LinkData* L = link_.data())
         {
             L->lastChop.store(chop, std::memory_order_relaxed);
@@ -831,7 +866,7 @@ private:
             if (v.gate >= 0.0 && v.release < 0 && v.age >= v.gate) v.release = kFadeOut;
             if (v.release >= 0)
             {
-                env *= (float)v.release / kFadeOut;
+                env *= (float)v.release / (float)v.relLen;
                 if (--v.release <= 0) { v.active = false; continue; }
             }
             l += a * env; r += b * env;
@@ -1002,6 +1037,27 @@ private:
         return h > 0 ? h / 100.f : hh::STYLES[clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1)].bpm;
     }
 
+    // GRID (0.12): the new chops only on quarters / eighths / sixteenths. A hit off the grid moves to the nearest
+    // grid step (the louder one wins a place), its timing offset goes, a chop on a coarse grid plays at least that long.
+    void applyChopGrid(hh::Pattern& p) const
+    {
+        const int g = getInt(P_CHOPGRID);
+        if (g <= 0) return; // AUTO: the style's rhythm
+        const int step = g == 1 ? 4 : g == 2 ? 2 : 1;
+        hh::ChopEv out[hh::LEN];
+        for (int s = 0; s < hh::LEN; ++s)
+        {
+            const hh::ChopEv& e = p.chop[s];
+            if (e.pad < 0) continue;
+            const int t = ((s + step / 2) / step * step) % hh::LEN;
+            if (out[t].pad >= 0 && out[t].vel >= e.vel) continue;
+            out[t] = e;
+            out[t].off = 0.f;
+            if (step > 1 && out[t].len < (float)step) out[t].len = (float)step;
+        }
+        for (int s = 0; s < hh::LEN; ++s) p.chop[s] = out[s];
+    }
+
     void regenerate(int track, bool keepUndo = true)
     {
         if (keepUndo)
@@ -1024,6 +1080,7 @@ private:
         seed_ = seed_ * 1664525u + 1013904223u;
         if (track < 0) for (bool& e : pat_.edited) e = false; // NEW ALL: every lane new, hand-edited ones too
         hh::generate(pat_, track, set_, info_, padSet_, seed_, track >= 0, bpmNow());
+        if (track < 0 || track == hh::T_CHOP) applyChopGrid(pat_);
         if (track < 0) ++loopId_;
         publishLoop();
     }
@@ -1457,7 +1514,18 @@ private:
         char b[96];
         int sig = hostSig_.load();
         double c0 = hostCycle_[0].load(), c1 = hostCycle_[1].load();
-        if (hostCycling_.load() || c1 > c0)
+        if (diagCount_.load() > 0)
+        {
+            // 0.12: what the MPC reported at the last start (count-in): q = position, s = sample position (k),
+            // r = recording (1 at the start, 2 later), j = a jump back (from > to), f = blocks the position stood still
+            const double jf = diagJumpFrom_.load(), jt = diagJumpTo_.load();
+            char j[24];
+            if (jf >= 0.0) std::snprintf(j, sizeof j, "j%.1f>%.1f", jf, jt);
+            else std::snprintf(j, sizeof j, "j-");
+            std::snprintf(b, sizeof b, "q%.2f s%.0fk r%d %s f%d", diagQ0_.load(), diagS0_.load() / 1000.0, diagRec_.load(),
+                          j, std::min(diagFrozen_.load(), 999));
+        }
+        else if (hostCycling_.load() || c1 > c0)
             std::snprintf(b, sizeof b, "loop %s %.1f-%.1f beats · %d/%d", hostCycling_.load() ? "on" : "off", c0, c1, sig / 100, sig % 100);
         else
             std::snprintf(b, sizeof b, "no loop info · bar at %.1f · %d/%d", hostBar_.load(), sig / 100, sig % 100);
@@ -1759,6 +1827,12 @@ private:
     std::atomic<bool> previewStop_{false}, resyncReq_{false}, bankReset_{false};
     std::atomic<int> lastPlayed_{-1}, hostBpmX100_{0}, curStep_{-1}, selReq_{-1};
     std::atomic<uint64_t> playingMask_{0};
+    // count-in measurement (0.12): what the MPC reports at a start (audio thread writes, SETUP shows it)
+    bool diagWas_ = false;
+    double diagLastQ_ = 0.0;
+    int diagBlocks_ = 0;
+    std::atomic<double> diagQ0_{0.0}, diagS0_{0.0}, diagJumpFrom_{-1.0}, diagJumpTo_{-1.0};
+    std::atomic<int> diagRec_{0}, diagFrozen_{0}, diagCount_{0};
     std::atomic<float> cPitch_[hh::PADS], cDecay_[hh::PADS], cFilter_[hh::PADS], cLevel_[hh::PADS];
     std::atomic<bool> cRev_[hh::PADS];
     PadMap pads_;

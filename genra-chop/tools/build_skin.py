@@ -78,6 +78,7 @@ def apply_theme(plugin):
     globals().update(t)
 
 
+OVERLAY_BG = "ff1e1d1e"  # the overlays' background (the SDK's dark default)
 CENTRED = "horizontallyCentred verticallyCentred"
 LEFT = "left verticallyCentred"
 RIGHT = "right verticallyCentred"
@@ -493,13 +494,16 @@ def chop_header(p):
     p.caption("chop", "136 8 110 48", 34.0, L_RED)
 
 
-def chop_page(p):
+def chop_page(p, q2=False):
     img = p.img
     chop_header(p)
     p.dark("250 9 330 46")
     p.value("GELADEN", "262 9 310 46", 22.0, L_CREAM)
     p.dark("590 9 310 46")
-    p.value("KOPF", "590 9 310 46", 20.0, L_CREAM, CENTRED)
+    if q2:  # the 2nd press of CHOP: the same page, the second Q-Link set (GRID, PAT, OCT, LENGTH, VIEW, BANK, MODE)
+        p.caption("qlpage2", "590 9 310 46", 18.0, L_CREAM, CENTRED)
+    else:
+        p.value("KOPF", "590 9 310 46", 20.0, L_CREAM, CENTRED)
     p.radio("VIEW", ("sample", "loop", "chopv"), (910, 1028, 1146), 9, 112, 46, 19.0)
     cols = img.columns()
     for i in range(124):
@@ -525,6 +529,9 @@ def chop_page(p):
     p.lcd("234 %d 108 50" % (y + 1))
     p.value("CHOP PAT", "234 %d 108 50" % (y + 1), 15.0, L_LCD, CENTRED)
     p.key("PAT NEXT", GREY, "next", "346 %d 34 50" % (y + 1), 22.0, L_KEYINK)
+    # GRID (0.12): the new chops on 1/4, 1/8, 1/16 or AUTO (the style); where the lanes have DENSITY
+    p.knob_only("GRID", "390 %d 48 48" % (y + 2), dens)
+    p.value("GRID", "444 %d 52 50" % (y + 1), 15.0, L_CREAM, CENTRED)
     p.key("NEW CHOPS", RED, "new", "500 %d 72 50" % (y + 1), 18.0)
     modes = ("DRUM MODE", "BASS MODE", "MELODY MODE", "PADS MODE")
     for k, cap in enumerate(("drums", "bass", "mel", "pads")):
@@ -661,11 +668,13 @@ def schlag_header(p):
     p.caption("schlag", "20 8 170 48", 34.0, L_RED)
 
 
-def schlag_main(p, funcs=False):
+def schlag_main(p, funcs=False, all_slots=False):
     img = p.img
     schlag_header(p)
     p.lcd("196 9 370 46")
-    if funcs:  # the 2nd press of the function key: the Q-Links on the chosen voice (tap its name)
+    if all_slots:  # the 3rd press: the Q-Links on the function slots of all eight voices
+        p.caption("qlall", "208 9 350 46", 19.0, L_LCD)
+    elif funcs:  # the 2nd press of the function key: the Q-Links on the chosen voice (tap its name)
         p.value("QLTEXT", "208 9 350 46", 19.0, L_LCD)
     else:
         p.value("KOPFLINK", "208 9 350 46", 19.0, L_LCD)
@@ -721,6 +730,10 @@ def schlag_main(p, funcs=False):
 
 def schlag_main_funcs(p):
     schlag_main(p, True)
+
+
+def schlag_main_all(p):
+    schlag_main(p, False, True)
 
 
 def schlag_steps(p):
@@ -867,8 +880,9 @@ def main():
     if plugin == "GENRA CHOP":
         cls = ChopPage
         STYLE_CHOICES[:] = [list(q.choices) for q in params if q.name == "STYLE"][0]
-        pages = (("BROWSER", chop_browser, ["941 464 298 123"]), ("CHOP", chop_page, ["596 502 664 76"]),
-                 ("STYLE", chop_style, []), ("PRINT", chop_print, []), ("SETUP", chop_setup, []))
+        pages = (("BROWSER", chop_browser, ["941 464 298 123"], 0, 0), ("CHOP", chop_page, ["596 502 664 76"], 1, 0),
+                 ("CHOP", lambda pg: chop_page(pg, True), ["596 502 664 76"], 1, 1),
+                 ("STYLE", chop_style, [], 2, 0), ("PRINT", chop_print, [], 3, 0), ("SETUP", chop_setup, [], 4, 0))
         choices = {"BANK": ["A", "B", "C", "D"], "VIEW": ["Sample", "Loop", "Chop"],
                    "MODE": ["Transient", "Equal"], "AUTO PADS": ["Auto", "Pads"],
                    "BASS OCT": ["OCT -1", "OCT 0", "OCT +1", "OCT +2"],
@@ -876,28 +890,42 @@ def main():
                    "LENGTH": ["Auto", "1 bar", "2 bars", "4 bars", "8 bars"],
                    "REC": ["Off", "On"], "DRUM MODE": ["STYLE", "HALF", "DOUBLE", "LAID BACK", "DRUNK", "MINIMAL"],
                    "BASS MODE": ["FOLLOW", "ROOT+5", "WALK", "808"], "MELODY MODE": ["STAB", "LEAD", "ARP", "RIFF"],
-                   "PADS MODE": ["SUSTAIN", "STAB", "SWELL"]}
-        screen = tabmap(5, {0: {13: idx["LIST"]},
-                            1: {1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
-                                5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"],
-                                9: idx["DENS DRUMS"], 10: idx["DENS BASS"], 11: idx["DENS MELODY"], 12: idx["DENS PADS"]},
-                            2: {1: idx["STYLE"], 2: idx["LENGTH"], 3: idx["VOLUME"]}})
+                   "PADS MODE": ["SUSTAIN", "STAB", "SWELL"], "GRID": ["AUTO", "1/4", "1/8", "1/16"]}
+        # CHOP: row 3 DENSITY, row 4 MODE of the four lanes (each lane one column); 8 PAT. The 2nd press of CHOP: GRID,
+        # PAT, BASS OCT, LENGTH, VIEW, BANK, MODE (Transient / Equal), rows 3 and 4 as on the first set
+        lanes = {9: idx["DENS DRUMS"], 10: idx["DENS BASS"], 11: idx["DENS MELODY"], 12: idx["DENS PADS"],
+                 13: idx["DRUM MODE"], 14: idx["BASS MODE"], 15: idx["MELODY MODE"], 16: idx["PADS MODE"]}
+        q1 = dict(lanes)
+        q1.update({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"],
+                   5: idx["STYLE"], 6: idx["CHOPS"], 7: idx["VOLUME"], 8: idx["CHOP PAT"]})
+        q2 = dict(lanes)
+        q2.update({1: idx["GRID"], 2: idx["CHOP PAT"], 3: idx["BASS OCT"], 4: idx["LENGTH"],
+                   5: idx["VIEW"], 6: idx["BANK"], 7: idx["MODE"]})
+        screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))
+                  for key, sub, a in ((0, 0, {13: idx["LIST"]}), (1, 0, q1), (1, 1, q2),
+                                      (2, 0, {1: idx["STYLE"], 2: idx["LENGTH"], 3: idx["VOLUME"]}), (3, 0, {}), (4, 0, {}))]
         program = qmap({1: idx["PITCH"], 2: idx["DECAY"], 3: idx["FILTER"], 4: idx["LEVEL"], 5: idx["VOLUME"]})
     elif plugin == "GENRA SCHLAG":
         cls = SchlagPage
         # the 2nd press of SCHLAG's function key: the same page, the Q-Links on the function slots (sub-tab)
         pages = (("SCHLAG", schlag_main, [], 0, 0), ("SCHLAG", schlag_main_funcs, [], 0, 1),
+                 ("SCHLAG", schlag_main_all, [], 0, 2),
                  ("FOLDER", schlag_folder, ["801 466 298 123"], 1, 0), ("STEPS", schlag_steps, [], 2, 0),
                  ("PRINT", schlag_print, [], 3, 0), ("SETUP", schlag_setup, [], 4, 0))
         choices = {"AUTO PADS": ["GENRA", "TRACK"], "VOICE": VOICE_NAMES, "BAR": ["1", "2", "3", "4"]}
         q = {v + 1: idx["RANDOM %s" % VOICE_NAMES[v]] for v in range(8)}
         q.update({v + 9: idx["LEVEL %s" % VOICE_NAMES[v]] for v in range(8)})
         # Q-LINKS: FUNCTIONS: the chosen voice's column: SAMPLE, RANDOM, upper + lower slot, LEVEL (stand-ins)
-        qf = {i + 1: idx["Q %s" % n] for i, n in enumerate(["SAMPLE", "RANDOM", "UPPER", "LOWER", "LEVEL"])}
-        qs = {1: idx["STEP KNOB 1"], 2: idx["STEP KNOB 2"]}  # STEPS: the two knobs
+        qf = {i + 1: idx["Q %s" % n] for i, n in enumerate(["SAMPLE", "RANDOM", "UPPER", "LOWER", "LEVEL", "KIND"])}
+        qf[8] = idx["VOICE"]  # turn = choose the voice
+        # the 3rd press: the upper (1-8) and the lower (9-16) function slot of all eight voices
+        qa = {v + 1: idx["VALUE %d 1" % (v + 1)] for v in range(8)}
+        qa.update({v + 9: idx["VALUE %d 2" % (v + 1)] for v in range(8)})
+        qs = {1: idx["STEP KNOB 1"], 2: idx["STEP KNOB 2"], 3: idx["BAR"],  # STEPS: the two knobs, BAR,
+              5: idx["STEP FN 1"], 6: idx["STEP FN 2"]}                     # what the two knobs set
         screen = [G.obj(("Tab", key + 1), ("SubTab", sub + 1), ("Bank Direction", "Row"), ("Q-Links", qmap(a)))
-                  for key, sub, a in ((0, 0, q), (0, 1, qf), (1, 0, {13: idx["LIST"]}), (2, 0, qs), (3, 0, {}),
-                                      (4, 0, {}))]
+                  for key, sub, a in ((0, 0, q), (0, 1, qf), (0, 2, qa), (1, 0, {13: idx["LIST"]}), (2, 0, qs),
+                                      (3, 0, {}), (4, 0, {1: idx["VOLUME"]}))]
         program = qmap(q)
     else:
         print("build_skin: unknown plugin %s" % plugin)
@@ -920,6 +948,17 @@ def main():
             style_p = [q for q in params if q.name == "STYLE"]
             if style_p and style_p[0].choices:
                 v.append(G.obj(("key", h["STYLE"]), ("value", list(style_p[0].choices))))
+    # 0.12: the MPC's overlays (the large knob on a double tap, menus) fill the whole screen with their background:
+    # keep them dark (GENRA CHOP's cream page made the whole screen white)
+    for k, v in page_data:
+        if k == "componentDefinitions":
+            for e in dict(v)["localComponentDefinitions"]:
+                d = dict(e)
+                if d["key"] in ("knob overlay", "knob overlay bipolar", "menu overlay"):
+                    comp = d["value"]
+                    for i, (ck, cv) in enumerate(comp):
+                        if ck == "backgroundData":
+                            comp[i] = (ck, G.background_data(OVERLAY_BG))
     qlinks = G.obj(("version", 4), ("info", G.obj(("version", 1), ("type", "CompleteDescription"))),
                    ("Screen Mode Q-Links", G.obj(("version", 4), ("map", screen))),
                    ("Program Mode Q-Links", program))
