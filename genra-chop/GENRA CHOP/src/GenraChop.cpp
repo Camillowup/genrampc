@@ -300,7 +300,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.13 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.14 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -439,7 +439,11 @@ public:
         if (rawPlay && tr.recording) diagRec_.store(diagRec_.load(std::memory_order_relaxed) | 2, std::memory_order_relaxed);
         diagWas_ = rawPlay;
         diagLastQ_ = tr.ppqPos;
-        const bool countIn = tr.ppqPos < -0.01 || tr.samplePos < -1.0 || frozen;
+        // 0.13 (DIAG 16.11.): the MPC's count-in runs PLAY + REC with the position a bar or more past the bar start it
+        // reports (e.g. 5.3 .. 9.3 beats while the bar start stays 0), then jumps to the one
+        const double beatsPerBar = tr.timeSigDenominator > 0 ? 4.0 * tr.timeSigNumerator / tr.timeSigDenominator : 4.0;
+        const bool pastBar = tr.recording && tr.ppqPos - tr.barStartPpq > beatsPerBar + 0.5;
+        const bool countIn = tr.ppqPos < -0.01 || tr.samplePos < -1.0 || frozen || pastBar;
         const bool playing = rawPlay && !countIn;
         if (!playing || !seq_) swapSeq();
         hostCycling_.store(tr.cycling, std::memory_order_relaxed);
@@ -501,7 +505,13 @@ public:
         {
             const double q0 = tr.ppqPos * 4.0;
             const double q1 = q0 + ctx.numFrames / spStep;
-            if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0) nextStep_ = std::ceil(q0 - 1e-6);
+            if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0)
+            {
+                // a start (also right after the count-in, where the MPC reports 0.001 .. 0.005): a step that began a
+                // moment ago still plays, at once
+                nextStep_ = std::floor(q0 + 1e-6);
+                if (q0 - nextStep_ > 0.25) nextStep_ += 1.0;
+            }
             const long len = loopLen_;
             while (nextStep_ < q1)
             {
@@ -513,7 +523,7 @@ public:
                 if (pos == 0 || swapNow_.exchange(false)) swapSeq();
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
-                double at = (nextStep_ - q0) * spStep;
+                double at = std::max(0.0, (nextStep_ - q0) * spStep); // a step begun a moment ago: at once
                 if (seq_ && autoMode)
                 {
                     const uint32_t pass = (uint32_t)((n - pos) / len);
@@ -1005,6 +1015,8 @@ private:
                 restore = true;
                 restored_ = false;
                 pat_ = restoredPattern_;
+                rawValid_ = false; // GRID: the loaded chops are the start (already in their grid)
+                lastGrid_ = -1;
                 for (int c = 0; c < hh::PADS; ++c) padSet_[c].lock = restoredLock_[c];
             }
         }
@@ -1045,25 +1057,56 @@ private:
         return h > 0 ? h / 100.f : hh::STYLES[clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1)].bpm;
     }
 
-    // GRID (0.12): the new chops only on quarters / eighths / sixteenths. A hit off the grid moves to the nearest
-    // grid step (the louder one wins a place), its timing offset goes, a chop on a coarse grid plays at least that long.
+    // GRID (0.13): AUTO and 1/16 = the style's chops as rolled. 1/4 and 1/8: calmer: per quarter / eighth one chop
+    // (the strongest of that cell) on the cell's start, by chance a second one half a cell later; no rolls (ratchets),
+    // no timing offsets. Acts on the running pattern (from its end, like an edit); back to AUTO = the chops as rolled.
     void applyChopGrid(hh::Pattern& p) const
     {
         const int g = getInt(P_CHOPGRID);
-        if (g <= 0) return; // AUTO: the style's rhythm
-        const int step = g == 1 ? 4 : g == 2 ? 2 : 1;
+        if (g != 1 && g != 2) return;
+        const int cell = g == 1 ? 4 : 2;
         hh::ChopEv out[hh::LEN];
-        for (int s = 0; s < hh::LEN; ++s)
+        for (int c0 = 0; c0 < hh::LEN; c0 += cell)
         {
-            const hh::ChopEv& e = p.chop[s];
-            if (e.pad < 0) continue;
-            const int t = ((s + step / 2) / step * step) % hh::LEN;
-            if (out[t].pad >= 0 && out[t].vel >= e.vel) continue;
-            out[t] = e;
-            out[t].off = 0.f;
-            if (step > 1 && out[t].len < (float)step) out[t].len = (float)step;
+            int a = -1, b = -1; // the strongest and the second strongest hit in the cell
+            for (int s = c0; s < c0 + cell; ++s)
+            {
+                const hh::ChopEv& e = p.chop[s];
+                if (e.pad < 0) continue;
+                if (a < 0 || e.vel > p.chop[a].vel) { b = a; a = s; }
+                else if (b < 0 || e.vel > p.chop[b].vel) b = s;
+            }
+            if (a < 0) continue;
+            uint32_t h = chopSeed_ ^ (uint32_t)(c0 * 2654435761u);
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+            const bool two = b >= 0 && (h & 1u);
+            out[c0] = p.chop[a];
+            out[c0].off = 0.f;
+            out[c0].ratchet = 1;
+            out[c0].len = (float)(two ? cell / 2 : cell);
+            if (two)
+            {
+                // the second keeps its own order in time: the earlier of the two hits plays first
+                if (b < a) { out[c0] = p.chop[b]; out[c0].off = 0.f; out[c0].ratchet = 1; out[c0].len = (float)(cell / 2); }
+                hh::ChopEv& t = out[c0 + cell / 2];
+                t = p.chop[b < a ? a : b];
+                t.off = 0.f;
+                t.ratchet = 1;
+                t.len = (float)(cell / 2);
+            }
         }
         for (int s = 0; s < hh::LEN; ++s) p.chop[s] = out[s];
+    }
+
+    // GRID turned: the running pattern's chops again from the last roll, in the new grid (from the pattern's end)
+    void gridChanged()
+    {
+        if (!rawValid_) { for (int s = 0; s < hh::LEN; ++s) chopRaw_[s] = pat_.chop[s]; rawValid_ = true; }
+        for (int s = 0; s < hh::LEN; ++s) pat_.chop[s] = chopRaw_[s];
+        applyChopGrid(pat_);
+        publishLoop();
+        static const char* names[4] = {"AUTO", "1/4", "1/8", "1/16"};
+        screen_.message(P_STATUS, std::string("GRID ") + names[clamp(getInt(P_CHOPGRID), 0, 3)] + ": at the pattern end", 2500);
     }
 
     void regenerate(int track, bool keepUndo = true)
@@ -1088,7 +1131,13 @@ private:
         seed_ = seed_ * 1664525u + 1013904223u;
         if (track < 0) for (bool& e : pat_.edited) e = false; // NEW ALL: every lane new, hand-edited ones too
         hh::generate(pat_, track, set_, info_, padSet_, seed_, track >= 0, bpmNow());
-        if (track < 0 || track == hh::T_CHOP) applyChopGrid(pat_);
+        if (track < 0 || track == hh::T_CHOP)
+        {
+            for (int s = 0; s < hh::LEN; ++s) chopRaw_[s] = pat_.chop[s]; // the chops as rolled (GRID starts from them)
+            rawValid_ = true;
+            chopSeed_ = seed_;
+            applyChopGrid(pat_);
+        }
         if (track < 0) ++loopId_;
         publishLoop();
     }
@@ -1629,6 +1678,12 @@ private:
     // ------------------------------------------------------------------ worker: buttons
     void handleTaps()
     {
+        // GRID turned (knob or Q-Link): the running pattern's chops in the new grid, from the pattern's end
+        {
+            const int g = getInt(P_CHOPGRID);
+            if (lastGrid_ < 0) lastGrid_ = g;
+            else if (g != lastGrid_) { lastGrid_ = g; gridChanged(); }
+        }
         for (auto& t : screen_.taps())
         {
             const int p = t.first;
@@ -1710,7 +1765,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.13 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.14 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }
@@ -1842,6 +1897,10 @@ private:
     double sr_ = 44100.0;
     double nextStep_ = 0.0;
     bool wasPlaying_ = false;
+    hh::ChopEv chopRaw_[hh::LEN];  // worker: the chop lane as rolled, before GRID
+    bool rawValid_ = false;
+    int lastGrid_ = -1;
+    uint32_t chopSeed_ = 1;        // the roll the chops came from (GRID's chance of a second chop)
     genramidi::Out midi_;
     MidiEv midiQ_[1024];
     int nMidi_ = 0;

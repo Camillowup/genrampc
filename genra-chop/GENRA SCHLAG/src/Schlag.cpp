@@ -343,7 +343,7 @@ public:
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.13 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.14 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -452,7 +452,9 @@ public:
         const bool frozen0 = raw0 && rawWas_ && std::fabs(tr0.ppqPos - rawLastQ_) < 1e-9;
         rawWas_ = raw0;
         rawLastQ_ = tr0.ppqPos;
-        countIn_ = tr0.ppqPos < -0.01 || tr0.samplePos < -1.0 || frozen0;
+        const double bpb0 = tr0.timeSigDenominator > 0 ? 4.0 * tr0.timeSigNumerator / tr0.timeSigDenominator : 4.0;
+        const bool pastBar0 = tr0.recording && tr0.ppqPos - tr0.barStartPpq > bpb0 + 0.5; // the MPC's count-in (DIAG)
+        countIn_ = tr0.ppqPos < -0.01 || tr0.samplePos < -1.0 || frozen0 || pastBar0;
         const bool playing0 = raw0 && !countIn_;
         // a hand edit (STEPS: HIT ON / OFF) is taken at once; a new loop at the end of the pattern
         if (cur_ < 0 || !playing0 || readyNow_.exchange(false)) { int r = ready_.load(std::memory_order_acquire); if (r >= 0) cur_ = r; }
@@ -495,7 +497,11 @@ public:
         if (playing && autoMode && cur_ >= 0)
         {
             const double q0 = tr.ppqPos * 4.0, q1 = q0 + ctx.numFrames / spStep;
-            if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0) nextStep_ = std::ceil(q0 - 1e-6);
+            if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0)
+            {
+                nextStep_ = std::floor(q0 + 1e-6); // a step that began a moment ago (start, end of the count-in) still plays
+                if (q0 - nextStep_ > 0.25) nextStep_ += 1.0;
+            }
             const float swing = loop->swingX1000 / 1000.f;
             while (nextStep_ < q1)
             {
@@ -508,7 +514,7 @@ public:
                     if (r >= 0 && r != cur_) { cur_ = r; inUse_.store(cur_, std::memory_order_release); loop = &loops_[cur_]; }
                 }
                 uint32_t round = (uint32_t)((n - pos) / len) + wraps_ * 7919u; // the pass of the loop
-                double base = (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0);
+                double base = std::max(0.0, (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0));
                 const uint32_t pass = (uint32_t)((n - pos) / len);
                 for (int v = 0; v < kVoices; ++v)
                 {
