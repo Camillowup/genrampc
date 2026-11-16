@@ -9,7 +9,7 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.12 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA CHOP** 0.13 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
 | **GENRA SCHLAG** 0.13 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
@@ -212,6 +212,11 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.13: **DIAG** on the SETUP page: tap it, then use the MPC for two minutes (Play, Stop, Overdub with
+  count-in, the step sequencer, pads). It writes `Genra/logs/diag-001.txt` (002, ...): the MPC's MIDI ports, the
+  running programs and network ports, every MIDI event the MPC's ports send and the host transport. It only reads.
+  Bring the file to the computer and send it.
 
 - GENRA CHOP 0.12 / GENRA SCHLAG 0.13: the count-in: press Overdub with the MPC's count-in, then read the row **MPC**
   on CHOP's SETUP page (q = position at the start, s = sample position in thousands, r = recording 1 at the start /

@@ -29,6 +29,7 @@
 #include "../../common/genra_files.h"
 #include "../../common/genra_link.h"
 #include "../../common/genra_midiout.h"
+#include "../../common/genra_diag.h"
 #include "../../common/genra_ui.h"
 
 #include <algorithm>
@@ -64,7 +65,7 @@ static const char* const kCaptions[][2] = {
     {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
     {"help3", "(pad 1 = bottom left)"}, {"help4", "Used by every GENRA plugin"},
     {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
-    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
+    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"diag", "DIAG"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
     {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
     {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"}};
@@ -73,7 +74,7 @@ static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
 static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "NEW CHOPS", "UNDO",
     "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK",
-    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR",
+    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG",
     "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4", "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"};
 static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
 
@@ -90,7 +91,7 @@ enum
     P_NEWALL = P_DENS0 + kLanes, P_NEW0,
     P_NEWCHOPS = P_NEW0 + kLanes, // NEW of the CHOPS row: built like the other NEW keys (with its flash)
     P_UNDO, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
-    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR,
+    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR, P_DIAG,
     P_MODEPREV0, P_MODENEXT0 = P_MODEPREV0 + kLanes,
     P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_OCTTAP, P_PATPREV, P_PATNEXT, P_SCROLL,
     P_ROWTAP0,
@@ -98,7 +99,7 @@ enum
     // texts
     P_PATH = P_SLOTTAP0 + kPads,
     P_LISTINFO, P_LOADED, P_HDR, P_CHOPSTXT, P_BARTXT, P_STATUS, P_LEARNINFO, P_MAPINFO, P_DRIVES, P_WRITE,
-    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR, P_CHOPTXT, P_VERSION,
+    P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR, P_CHOPTXT, P_VERSION, P_DIAGINFO,
     P_STYLENAME0,
     P_SLOTTXT0 = P_STYLENAME0 + hh::NUM_STYLES,
     P_SLOTLEN0 = P_SLOTTXT0 + kPads,
@@ -255,7 +256,7 @@ public:
         addButton("NEW CHOPS");
         for (const char* b : {"UNDO", "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT",
                               "LEARN", "BACK", "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE",
-                              "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR"})
+                              "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG"})
             addButton(b);
         for (const char* d : {"MODE BACK", "MODE NEXT"})
             for (int k = 0; k < kLanes; ++k) addButton((std::string(d) + " " + std::to_string(k + 1)).c_str());
@@ -269,7 +270,7 @@ public:
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
         for (const char* t : {"PFAD", "LISTINFO", "GELADEN", "KOPF", "CHOPZAHL", "TAKT", "STATUS", "LERNINFO",
                               "BELEGUNG", "LAUFWERKSLISTE", "SCHREIBEN", "LINKINFO", "ANALYSE", "SPEICHERORT",
-                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF", "CHOPTEXT", "VERSION"})
+                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF", "CHOPTEXT", "VERSION", "DIAGINFO"})
             addText(t);
         for (int i = 0; i < hh::NUM_STYLES; ++i) addText(("STYLENAME " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTTEXT " + std::to_string(i + 1)).c_str());
@@ -299,7 +300,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.12 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.13 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -400,6 +401,13 @@ public:
         if (previewStop_.exchange(false) && preview_) previewFade_ = kFadeOut * 4;
 
         const Transport& tr = ctx.transport;
+        // DIAG: what the host reports, for the capture (genra_diag.h)
+        diagTr_.ppq.store(tr.ppqPos, std::memory_order_relaxed);
+        diagTr_.samplePos.store(tr.samplePos, std::memory_order_relaxed);
+        diagTr_.tempo.store(tr.bpm, std::memory_order_relaxed);
+        diagTr_.barStart.store(tr.barStartPpq, std::memory_order_relaxed);
+        diagTr_.flags.store((tr.valid ? 1 : 0) | (tr.playing ? 2 : 0) | (tr.recording ? 4 : 0) | (tr.ppqValid ? 8 : 0) |
+                                (tr.cycling ? 16 : 0), std::memory_order_relaxed);
         const bool autoMode = getInt(P_AUTO) == 0;
         // the MPC's count-in (Overdub / Rec): stay silent until the one. 0.12: how the MPC reports it is unknown, so
         // three signs count: a position before the start, a negative sample position, a position that stands still
@@ -1512,6 +1520,17 @@ private:
     void hostTexts()
     {
         char b[96];
+        // DIAG: the capture's state (texts on the MPC: at most 31 characters)
+        if (diag_.running()) std::snprintf(b, sizeof b, "running %d s · %ld events", diag_.secondsLeft(), diag_.events());
+        else if (!diag_.error().empty()) std::snprintf(b, sizeof b, "%.30s", diag_.error().c_str());
+        else if (!diag_.lastFile().empty())
+        {
+            const std::string f = diag_.lastFile();
+            const size_t k = f.rfind("/logs/");
+            std::snprintf(b, sizeof b, "saved Genra%.24s", k == std::string::npos ? f.c_str() : f.c_str() + k);
+        }
+        else std::snprintf(b, sizeof b, "tap DIAG: 2 min capture");
+        screen_.setText(P_DIAGINFO, b);
         int sig = hostSig_.load();
         double c0 = hostCycle_[0].load(), c1 = hostCycle_[1].load();
         if (diagCount_.load() > 0)
@@ -1685,6 +1704,17 @@ private:
             }
             else if (p == P_PRINTSTD) { printDirChosen_.clear(); settings_.set("printdir", ""); settings_.save(); screen_.message(P_PRINTSTATUS, "Print folder: Genra/PRINT"); }
             else if (p == P_LEARN) pads_.startLearning();
+            else if (p == P_DIAG)
+            {
+                const std::string dir = genraDir();
+                if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
+                else if (!diag_.running())
+                {
+                    const std::string head = "GENRA CHOP 0.13 · LINK v3 · MIDI OUT: " + midi_.status();
+                    diag_.start(dir, head, &diagTr_, 120);
+                    screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
+                }
+            }
             else if (p == P_SCROLL) browser_.scroll(t.second > 0 ? 1 + (t.second - 1) / 6 : -1 - (-t.second - 1) / 6);
             else if (p == P_BACK) { browser_.up(); rememberDir(); stopPreview(); }
             else if (p == P_DRVBTN) { browser_.drives(); stopPreview(); }
@@ -1827,6 +1857,8 @@ private:
     std::atomic<bool> previewStop_{false}, resyncReq_{false}, bankReset_{false};
     std::atomic<int> lastPlayed_{-1}, hostBpmX100_{0}, curStep_{-1}, selReq_{-1};
     std::atomic<uint64_t> playingMask_{0};
+    genradiag::Transport diagTr_;  // DIAG: the host transport (audio thread writes)
+    genradiag::Diag diag_;         // DIAG: the capture (own thread)
     // count-in measurement (0.12): what the MPC reports at a start (audio thread writes, SETUP shows it)
     bool diagWas_ = false;
     double diagLastQ_ = 0.0;

@@ -480,7 +480,7 @@ def print_page(p, title_x, has_dir_buttons):
 # ------------------------------------------------------------------ GENRA CHOP
 CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "NEW CHOPS", "UNDO", "SAVE WAV", "CHOPS MINUS",
               "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK", "DRIVES", "PAGE BACK",
-              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR",
+              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG",
               "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4",
               "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"]
 
@@ -650,6 +650,9 @@ def chop_setup(p):
         p.dark("450 %d 810 60" % y)
         p.caption(key, "470 %d 220 60" % y, 24.0, L_CREAM_MUTED)
         p.value(param, "690 %d 560 60" % y, 24.0, L_CREAM)
+    # DIAG: a 2-minute capture of what the MPC offers and sends, written to Genra/logs/ (genra_diag.h)
+    p.key("DIAG", RED, "diag", "20 400 400 90", 30.0)
+    p.value("DIAGINFO", "20 500 400 50", 20.0, L_DARK)
 
 
 # ------------------------------------------------------------------ SCHLAG
