@@ -300,7 +300,7 @@ public:
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.16 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.17 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -494,7 +494,7 @@ public:
         const double spStep = sr_ * 60.0 / bpm / 4.0;
         // REC: armed + playing; the first bar after the start (or after arming) is the count-in
         // 0.16: in PADS GENRA records along while the MPC records (Record / Overdub), no count-in of its own
-        const bool mpcRec = !autoMode && tr.recording;
+        const bool mpcRec = !autoMode && tr.recording && rawPlay; // 0.17: only while the MPC runs (not 'armed' when stopped)
         const bool recOn = getBool(P_REC) || mpcRec;
         const double recQ0 = playing ? tr.ppqPos * 4.0 : 0.0;
         if (recOn && playing && (!recWas_ || !wasPlaying_))
@@ -561,6 +561,10 @@ public:
             while (ev < ctx.numMidiEvents && ctx.midi[ev].sampleOffset <= i)
             {
                 const MidiEvent& e = ctx.midi[ev++];
+                // 0.17: GENRA's own MIDI OUT (bass 2, melody 3, pads 4, drums 10) coming back on this track (its input
+                // on GENRA CHOP OUT / all channels) is no pad hit: it would play and record the chops as a spam
+                const int ch = e.channel();
+                if (ch == kChBass || ch == kChMel || ch == kChPads || ch == kChDrums) continue;
                 if (e.isNoteOn())
                 {
                     int chop = noteOn(e.note(), e.velocity() / 127.f, bank, true);
@@ -1789,7 +1793,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.16 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.17 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }

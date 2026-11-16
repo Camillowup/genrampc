@@ -9,7 +9,7 @@ On the MPC, GENRA is two plugins:
 
 | Plugin | Track | What it does | Colours |
 |---|---|---|---|
-| **GENRA CHOP** 0.16 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA CHOP** 0.17 | the chef | Sample browser, chopper (transient or equal), 29 styles, the loop on the MPC's transport, chops on the pads, REC your own chops, SAVE WAV, **MIDI OUT of every lane** | retro cream, green LCD (MPC60 / MPC Live II Retro) |
 | **GENRA SCHLAG** 0.14 | drums | 8-voice drum random sampler (a Polyend Play for the MPC): RANDOM per voice in seven kinds, 2 function slots per voice, STEPS with values per step, SAVE SAMPLE, kits | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (plugins, keygroups, drum programs, external synths):
@@ -217,6 +217,9 @@ takes a new loop at the end of the pattern, and sends NEW, UNDO, drum edits (HIT
 - `../chop-test/`: CHOP TEST 0.7 and CHOP LINK, kept as an archive, no longer built.
 
 ## What to report back
+
+- GENRA CHOP 0.17: notes on MIDI channels 2, 3, 4 and 10 coming into GENRA CHOP's track (its own MIDI OUT looping
+  back) no longer play or record chops: no more 16th chop spam after your own take in PADS. Not 'REC armed' after Stop.
 
 - GENRA CHOP 0.16: in PADS, record your chops with the MPC's Record / Overdub only: after Stop, do bass, melody and
   pads come to your chops? GRID 1 BAR and 1/2 (4 and 8 chops on 4 bars).
