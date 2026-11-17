@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # a release (made by hand on GitHub or with the API) gets the plugins as a zip
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 # CHOP TEST and CHOP LINK (chop-test/) stay in the repo as an archive and are no longer built.
 
@@ -54,3 +60,11 @@ jobs:
         with:
           name: genra-mpc
           path: dist/
+
+      - name: Attach the plugins to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist && zip -r "../GENRA-MPC-${{ github.event.release.tag_name }}.zip" "VST2 Plugins"
+          cd .. && gh release upload "${{ github.event.release.tag_name }}" "GENRA-MPC-${{ github.event.release.tag_name }}.zip" --clobber
