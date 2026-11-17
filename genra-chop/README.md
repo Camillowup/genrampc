@@ -10,8 +10,8 @@ GENRA is two plugins that work together:
 
 | Plugin | Version | What it is | Look |
 |---|---|---|---|
-| **GENRA CHOP** | 0.18 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** | 0.15 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
+| **GENRA CHOP** | 0.19 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA SCHLAG** | 0.16 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (keygroups, plugins, drum programs, external
 synths): GENRA CHOP sends every part as MIDI on its own channel. Both plugins run on the MPC's transport – there is
@@ -84,7 +84,7 @@ learned pads live in `<drive>/Genra/` and are kept.
 - The path on top, nine rows below. Tap a **folder** to open it; tap a **WAV** once to hear it, a second time
   (or **LOAD SAMPLE**) to load it.
 - **< PAGE / PAGE >** scroll the list, **BACK** goes one folder up, **DRIVES** lists the drives.
-- **SAVE HERE** makes the open folder the place where SAVE WAV writes.
+- **SAVE HERE** makes the open folder the place where SAVE CHOP and SAVE LOOP write.
 - **LIST** (knob, Q-Link 13, data wheel) scrolls too.
 
 ### 4.2 CHOP page – overview
@@ -94,14 +94,14 @@ learned pads live in `<drive>/Genra/` and are kept.
 | **Header** | the sample, tempo · key · LINK; **LENGTH** (double tap = list); **Q-LINKS 1 / 2** (which set the Q-Links have; press the CHOP key to switch); **BAR** and four lamps (the bar that plays); **SAMPLE / LOOP / CHOP** switch the display |
 | **Display** | the waveform with the chop marks (SAMPLE), the loop (LOOP) or the chop you played (CHOP) |
 | **16 slots** | the chops of the current bank: number · chord, length, `R` reversed, `L` locked. Tap = play and select |
-| **Rows CHOPS, DRUMS, BASS, MELODY, PADS** | a lamp while the row plays, what it plays, **M** (mute), the kind (PAT / MODE, double tap = list), GRID / DENSITY, **NEW** |
+| **Rows CHOPS, DRUMS, BASS, MELODY, PADS** | a lamp while the row plays, what it plays, **M** (mute), **< >** and the kind (PAT / MODE; tap = chosen with a red frame, the data wheel steps; double tap = list), GRID / DENSITY, **NEW** |
 | **STYLE** | double tap = all 29 styles as a list, **< >** step through them; decade and tempo below |
 | **NEW ALL**, **UNDO** | roll everything new, the loop before |
 | **MODE / CHOPS / BANK** | Transient or Equal, how many chops, which 16 sit on the pads (dots: how full each bank is) |
 | **AUTO / PADS** | who plays the chops – see 4.5 |
 | **CHOKE / REV / LOCK** | a new chop cuts the one sounding / the selected chop backwards / keeps its pad on NEW |
 | **The chop line** | which chop PITCH · DECAY · FILTER · LEVEL act on (the pad you played last) |
-| **STATUS · REC · CLEAR · SAVE WAV** | messages, record chops, empty the loop (two taps), save the selected chop as WAV |
+| **STATUS · REC · CLEAR · SAVE CHOP · SAVE LOOP** | messages, record chops, empty the loop (two taps), save the selected chop as WAV, save the chop track as a loop WAV |
 
 **M** on a row mutes it at once: its sound, its MIDI OUT channel and – for DRUMS – SCHLAG over LINK. The part stays and
 comes back when you turn M off.
@@ -152,9 +152,10 @@ Each row shows what the part plays (hits, notes, the chords of the four bars) an
 
 - **DENSITY** – how much it plays; 50 % = the style (Q-Links 9–12).
 - **NEW** – rolls only this part. NEW DRUMS keeps the bass; NEW BASS rolls the bass to the kicks playing now.
-- **OCT** next to BASS: the bass line −1 / 0 / +1 / +2 octaves (tap = next). Acts at once.
+- **OCT** under BASS: the bass line −1 / 0 / +1 / +2 octaves (tap = next). Acts at once.
 
-MODE and DENSITY take effect with the next NEW. **NEW ALL rolls every part**, also one you edited by hand – record it
+MODE and DENSITY take effect with the next NEW. So does a chop's **PITCH**: bass, melody and pads are built on the chop
+as tuned (the chord in the slot stays the one the analysis found). **NEW ALL rolls every part**, also one you edited by hand – record it
 into the MPC sequence first.
 
 ### 4.5 AUTO, PADS, REC and CLEAR
@@ -218,9 +219,10 @@ folder you choose (PRINT HERE / PRINT STANDARD). Load it into an MPC track. Afte
 ### 4.10 SETUP page
 
 - **LEARN** – tap it, then hit the MPC's pads 1–16 in order: the pad map is saved for both plugins.
-- The pad map, the drives, where SAVE WAV writes, LINK status, MIDI OUT status, the version.
+- The pad map, the drives, where SAVE CHOP / SAVE LOOP write, LINK status, MIDI OUT status, the version.
 - **MPC** – what the MPC tells the plugin about its loop, tempo and count-in.
 - **DIAG** – a two-minute log of the MPC's MIDI and transport (`Genra/logs/`), for bug reports. It only reads.
+- **SKIN** – colour schemes, coming later.
 
 ### 4.11 Q-Links
 
@@ -317,7 +319,7 @@ A voice holds up to 128 WAVs of its folder or 16 MB, whichever comes first (WAVs
 
 - **PRINT** – the drum pattern as a MIDI file (`Print NN Drums …`). Afterwards SCHLAG switches to TRACK.
 - **SETUP** – LEARN, **HAT CHOKE** (the closed hat cuts the open one), **MPC KIT NOTES** (read every MIDI channel as
-  drum-program notes), pad map, root folder, LINK, version.
+  drum-program notes), pad map, root folder, LINK, version, **DIAG** (as in GENRA CHOP) and **SKIN** (coming later).
 
 ### 5.6 Q-Links
 

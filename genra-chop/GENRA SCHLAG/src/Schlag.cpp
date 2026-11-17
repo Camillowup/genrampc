@@ -28,6 +28,7 @@
 #include "../../common/genra_files.h"
 #include "../../common/genra_link.h"
 #include "../../common/genra_ui.h"
+#include "../../common/genra_diag.h"
 
 #include <algorithm>
 #include <limits>
@@ -44,7 +45,7 @@ namespace {
 
 static const int kVoices = 8, kSlots = 2, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
 static const int kSegs = 3, kChips = 4, kLvlFrames = 21; // 0.15
-static const int kMaxFiles = 128, kFlashes = 29; // 0.15: + COPY BAR, PASTE, CLEAR BAR
+static const int kMaxFiles = 128, kFlashes = 31; // 0.15: + COPY BAR, PASTE, CLEAR BAR; 0.16: + DIAG, SKIN
 static const size_t kMaxVoiceBytes = 16u << 20; // the samples of one voice: at most 16 MB in memory
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
@@ -86,7 +87,7 @@ static const char* const kCaptions[][2] = {
     {"padsinfo", "TRACK: only the track's notes"}, {"learn", "LEARN"}, {"help1", "Tap LEARN, then press"},
     {"help2", "pads 1 to 16 in order"}, {"help3", "(pad 1 = bottom left)"},
     {"help4", "Used by every GENRA plugin"}, {"choke", "HAT CHOKE"}, {"r1", "Pad map"}, {"r2", "Root folder"},
-    {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
+    {"r3", "LINK"}, {"r4", "Memory"}, {"r5", "Version"}, {"diag", "DIAG"}, {"skin", "SKIN"}, {"setup", "· SETUP"}, {"savesmp", "SAVE SAMPLE"},
     {"savekit", "SAVE KIT"}, {"kitnotes", "MPC KIT NOTES"}, {"kithelp1", "MIDI ch 10: MPC kit notes"},
     {"kithelp2", "(A01-A08 = KICK .. PERC)"}, {"kithelp3", "ON: on every channel"}, {"loadsmp", "LOAD SAMPLE"}, {"stepstitle", "· STEPS"},
     {"bar1", "BAR 1"}, {"bar2", "BAR 2"}, {"bar3", "BAR 3"}, {"bar4", "BAR 4"}, {"clearstep", "CLEAR STEP"},
@@ -131,6 +132,7 @@ enum
     P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT, P_CLEARALL, P_EMPTY, P_LOADKIT,
     P_SKFTAP0,                            // STEPS: knob k's field: < = P_SKFTAP0 + 2k, > = + 2k + 1 (flashes 0..25)
     P_COPYBAR = P_SKFTAP0 + 2 * kStepKnobs, P_PASTE, P_CLEARBAR, // 0.15 (flashes 26..28)
+    P_DIAG, P_SKIN,                       // 0.16: SETUP (flashes 29, 30)
     P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
@@ -148,6 +150,7 @@ enum
     P_HDRLINK = P_CHIPTAP0 + kChips, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
     P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT, P_QLTXT,
     P_KITTXT, P_PAGETXT,                  // 0.15: the kit's name, the list's page
+    P_DIAGINFO,                           // 0.16: SETUP: DIAG's state
     P_SKFTXT0,                            // STEPS: the knobs' fields (function names)
     P_SKVTXT0 = P_SKFTXT0 + kStepKnobs,   // STEPS: the knobs' values
     P_SLKTXT0_ = P_SKVTXT0 + kStepKnobs,
@@ -320,7 +323,7 @@ public:
         addParam(boolParam("follow", "FOLLOW", false));
         for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP",
                               "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT",
-                              "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2", "COPY BAR", "PASTE", "CLEAR BAR"})
+                              "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2", "COPY BAR", "PASTE", "CLEAR BAR", "DIAG", "SKIN"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -338,7 +341,7 @@ public:
         for (int i = 0; i < kChips; ++i) addButton(("CHIP TAP " + std::to_string(i + 1)).c_str());
         for (const char* t : {"KOPFLINK", "PFAD", "LISTINFO", "STIMMINFO", "STIMMORDNER", "STIMMSAMPLE", "STIMMANZAHL",
                               "STATUS", "PRINTINFO", "PRINTSTATUS", "PRINTORDNER", "LERNINFO", "BELEGUNG", "HAUPTORDNER",
-                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND", "QLTEXT", "KITTEXT", "SEITE",
+                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND", "QLTEXT", "KITTEXT", "SEITE", "DIAGINFO",
                               "STEPFN 1", "STEPFN 2", "STEPFNWERT 1", "STEPFNWERT 2"})
             addText(t);
         for (int i = 0; i < kLocks; ++i) addText(("STEPWERT " + std::to_string(i + 1)).c_str());
@@ -384,7 +387,7 @@ public:
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.15 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.16 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -487,6 +490,13 @@ public:
         }
         // the loop that plays: a new one from GENRA CHOP takes over at the end of the pattern (or at once when stopped)
         const Transport& tr0 = ctx.transport;
+        // 0.16 DIAG: what the host reports, for the capture (genra_diag.h)
+        diagTr_.ppq.store(tr0.ppqPos, std::memory_order_relaxed);
+        diagTr_.samplePos.store(tr0.samplePos, std::memory_order_relaxed);
+        diagTr_.tempo.store(tr0.bpm, std::memory_order_relaxed);
+        diagTr_.barStart.store(tr0.barStartPpq, std::memory_order_relaxed);
+        diagTr_.flags.store((tr0.valid ? 1 : 0) | (tr0.playing ? 2 : 0) | (tr0.recording ? 4 : 0) | (tr0.ppqValid ? 8 : 0) |
+                                (tr0.cycling ? 16 : 0), std::memory_order_relaxed);
         // the MPC's count-in: silent until the one (like GENRA CHOP 0.12: a position before the start, a negative sample
         // position or a position that stands still while "playing")
         const bool raw0 = tr0.valid && tr0.playing && tr0.ppqValid;
@@ -1606,6 +1616,17 @@ private:
         for (size_t x : kitBytes_) bytes += x;
         std::snprintf(b, sizeof b, "%.1f MB samples loaded", bytes / 1048576.0);
         screen_.setText(P_MEMINFO, b);
+        // DIAG's state (texts on the MPC: at most 31 characters)
+        if (diag_.running()) std::snprintf(b, sizeof b, "running %d s · %ld events", diag_.secondsLeft(), diag_.events());
+        else if (!diag_.error().empty()) std::snprintf(b, sizeof b, "%.30s", diag_.error().c_str());
+        else if (!diag_.lastFile().empty())
+        {
+            const std::string f = diag_.lastFile();
+            const size_t k = f.rfind("/logs/");
+            std::snprintf(b, sizeof b, "saved Genra%.24s", k == std::string::npos ? f.c_str() : f.c_str() + k);
+        }
+        else std::snprintf(b, sizeof b, "tap DIAG: 2 min capture");
+        screen_.setText(P_DIAGINFO, b);
         int step = curStep_.load();
         screen_.setText(P_STATUS, step >= 0 ? "Bar " + std::to_string(step / 16 + 1) + " / 4" : std::string(getInt(P_AUTO) == 0 ? "GENRA" : "TRACK"));
     }
@@ -2205,6 +2226,17 @@ private:
                 else if (p == P_COPYBAR) copyBar();
                 else if (p == P_PASTE) pasteBar();
                 else if (p == P_CLEARBAR) clearBar();
+                else if (p == P_SKIN) screen_.message(P_DIAGINFO, "SKIN: coming soon", 4000);
+                else if (p == P_DIAG)
+                {
+                    const std::string dir = genraDir();
+                    if (dir.empty()) screen_.message(P_DIAGINFO, "DIAG: no drive to write to", 3000);
+                    else if (!diag_.running())
+                    {
+                        diag_.start(dir, "GENRA SCHLAG 0.16 · LINK v3", &diagTr_, 120);
+                        screen_.message(P_DIAGINFO, "DIAG: 2 min, now use the MPC", 4000);
+                    }
+                }
                 else if (p >= P_ROLL0 && p < P_ROLL0 + kVoices)
                 {
                     const int v = p - P_ROLL0; // 0.15: ROLL: a new roll, as if RANDOM were turned
@@ -2314,6 +2346,8 @@ private:
 
     genraui::Screen screen_;
     genralink::Link link_;
+    genradiag::Transport diagTr_;  // 0.16 DIAG: the host transport (audio thread writes)
+    genradiag::Diag diag_;         // 0.16 DIAG: the capture (own thread)
     PadMap pads_;
     Settings settings_{"SCHLAG.txt"};
     Browser browser_;

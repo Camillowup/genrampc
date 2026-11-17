@@ -2,6 +2,13 @@
 
 What to check on the MPC after each build (newest first). The user manual is in [README.md](README.md).
 
+- GENRA CHOP 0.19 / GENRA SCHLAG 0.16: first, does the list now show the values on a double tap (PAT, MODE, STYLE,
+  LENGTH; SCHLAG: RANDOM kind, function slots)? A single tap on such a field or on a knob: a red frame, the data wheel
+  steps. CHOP rows: < > beside PAT / MODE, M the whole row high, OCT as a key under BASS. SAVE LOOP: a WAV of the
+  chop track (`<sample> loop <BPM>bpm.wav`, next to SAVE CHOP's files); does it loop without a gap? PITCH a chop,
+  NEW BASS: does the bass follow the tuned chop? SKIN on both SETUP pages ("coming soon"), DIAG on SCHLAG's SETUP.
+  SCHLAG: bigger M / S, RANDOM kind, HOLD, ROLL, function fields, FOLDER page keys, STEPS < >.
+
 - GENRA CHOP 0.18 / GENRA SCHLAG 0.15: the new pages. Do the lists open on a double tap (LENGTH, PAT, MODE, STYLE;
   SCHLAG: RANDOM kind, function slots, STEPS fields)? M per row on GENRA CHOP (sound, MIDI OUT, SCHLAG's drums), the
   row lamps, the bar lamps, BANK dots, CLEAR / CLEAR ALL / BASIC / EMPTY with two taps. SCHLAG: ROLL, "+n", LEVEL bar,

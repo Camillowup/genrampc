@@ -33,6 +33,7 @@
 #include "../../common/genra_ui.h"
 
 #include <algorithm>
+#include <unistd.h>
 #include <chrono>
 #include <cmath>
 #include <mutex>
@@ -55,7 +56,7 @@ static const char* const kCaptions[][2] = {
     {"genra", "GENRA"}, {"chop", "CHOP"}, {"sample", "SAMPLE"}, {"loop", "LOOP"}, {"chopv", "CHOP"},
     {"style", "STYLE"}, {"newall", "NEW ALL"}, {"new", "NEW"}, {"modus", "MODE"}, {"transient", "Transient"},
     {"equal", "Equal"}, {"chops", "CHOPS"}, {"minus", "-"}, {"plus", "+"}, {"bank", "BANK"},
-    {"bankA", "A"}, {"bankB", "B"}, {"bankC", "C"}, {"bankD", "D"}, {"undo", "UNDO"}, {"savewav", "SAVE WAV"},
+    {"bankA", "A"}, {"bankB", "B"}, {"bankC", "C"}, {"bankD", "D"}, {"undo", "UNDO"}, {"savewav", "SAVE CHOP"},
     {"drums", "DRUMS"}, {"bass", "BASS"}, {"mel", "MELODY"}, {"pads", "PADS"}, {"prev", "<"}, {"next", ">"}, {"stprev", "< STYLE"}, {"stnext", "STYLE >"},
     {"auto", "AUTO"}, {"padsmode", "PADS"}, {"choke", "CHOKE"}, {"rev", "REV"}, {"lock", "LOCK"},
     {"print", "PRINT"}, {"printtitle", "· PRINT"}, {"after", "After PRINT"}, {"autoinfo", "AUTO: the loop plays"},
@@ -65,20 +66,22 @@ static const char* const kCaptions[][2] = {
     {"help1", "Tap LEARN, then press"}, {"help2", "pads 1 to 16 in order"},
     {"help3", "(pad 1 = bottom left)"}, {"help4", "Used by every GENRA plugin"},
     {"r1", "Pad map"}, {"r2", "Drives"}, {"r3", "Writing"}, {"r4", "LINK"}, {"r5", "Analysis"},
-    {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"diag", "DIAG"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
+    {"r6", "SAVE to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"diag", "DIAG"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
     {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
     {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"},
     // 0.18: the new main page
     {"ql1", "Q-LINKS 1"}, {"ql1s", "press CHOP: set 2"}, {"ql2", "Q-LINKS 2"}, {"ql2s", "press CHOP: set 1"},
     {"lensub", "LENGTH"}, {"autosub", "GENRA plays the chops"}, {"padssub", "you play the chops"}, {"m", "M"},
-    {"clearsub", "tap twice"}, {"listsub", "2x tap = list"}};
+    {"clearsub", "tap twice"}, {"listsub", "2x tap = list"},
+    // 0.19
+    {"saveloop", "SAVE LOOP"}, {"skin", "SKIN"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
 static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "NEW CHOPS", "UNDO",
     "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK",
-    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG",
+    "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG", "SAVE LOOP", "SKIN",
     "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4", "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"};
 static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
 static const int kRowsM = 5; // 0.18: the rows with M and a lamp: CHOPS + the four lanes
@@ -97,7 +100,7 @@ enum
     P_NEWALL = P_MUTE0 + kRowsM, P_NEW0,
     P_NEWCHOPS = P_NEW0 + kLanes, // NEW of the CHOPS row: built like the other NEW keys (with its flash)
     P_UNDO, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
-    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR, P_DIAG,
+    P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR, P_DIAG, P_SAVELOOP, P_SKIN,
     P_MODEPREV0, P_MODENEXT0 = P_MODEPREV0 + kLanes,
     P_REVBTN = P_MODENEXT0 + kLanes, P_LOCKBTN, P_OCTTAP, P_PATPREV, P_PATNEXT, P_SCROLL,
     P_ROWTAP0,
@@ -272,7 +275,7 @@ public:
         addButton("NEW CHOPS");
         for (const char* b : {"UNDO", "SAVE WAV", "CHOPS MINUS", "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT",
                               "LEARN", "BACK", "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE",
-                              "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG"})
+                              "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG", "SAVE LOOP", "SKIN"})
             addButton(b);
         for (const char* d : {"MODE BACK", "MODE NEXT"})
             for (int k = 0; k < kLanes; ++k) addButton((std::string(d) + " " + std::to_string(k + 1)).c_str());
@@ -321,7 +324,7 @@ public:
         for (int i = 0; i < kRowsM; ++i) screen_.strip(P_ACT0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.18 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.19 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -1161,6 +1164,9 @@ private:
                 knobs_.dens[k] = clamp(get(P_DENS0 + k), 0.f, 100.f) / 100.f;
         set_.key = info_.key;
         set_.keyAuto = true;
+        // 0.19: a chop's PITCH counts for the chords: NEW (ALL, BASS ..) builds on the chop as tuned
+        for (int c = 0; c < hh::PADS; ++c)
+            padSet_[c].pitch = (int8_t)clamp((int)std::lround(cPitch_[c].load(std::memory_order_relaxed)), -24, 24);
         seed_ = seed_ * 1664525u + 1013904223u;
         if (track < 0) for (bool& e : pat_.edited) e = false; // NEW ALL: every lane new, hand-edited ones too
         if (track == hh::T_HARMONY) // 0.15 (REC off): the accompaniment to the recorded chops; chops stay as played
@@ -1557,10 +1563,9 @@ private:
     }
 
     // ------------------------------------------------------------------ worker: files
-    void saveChop()
+    // where SAVE CHOP / SAVE LOOP write: the folder chosen on the BROWSER page, else "GENRA CHOP" next to the sample
+    std::string saveFolder()
     {
-        int chop = sel_;
-        if (chop < 0 || chop >= info_.count || src_.frames() == 0) { screen_.message(P_STATUS, "choose a chop first"); return; }
         std::string dir;
         {
             std::lock_guard<std::mutex> g(mtx_);
@@ -1570,12 +1575,142 @@ private:
         dir += "/GENRA CHOP";
         if (!saveDir_.empty() && isDir(saveDir_)) dir = saveDir_;
         ::mkdir(dir.c_str(), 0777);
+        return dir;
+    }
+
+    void saveChop()
+    {
+        int chop = sel_;
+        if (chop < 0 || chop >= info_.count || src_.frames() == 0) { screen_.message(P_STATUS, "choose a chop first"); return; }
         if (chopEnd_[chop] <= chopStart_[chop]) { screen_.message(P_STATUS, "the chop is empty"); return; }
+        const std::string dir = saveFolder();
         std::vector<uint8_t> wav = hh::writeWav(src_, chopStart_[chop], chopEnd_[chop], cRev_[chop].load(), (int)std::lround(cPitch_[chop].load()));
         char name[96];
         std::snprintf(name, sizeof name, "/%s chop%02d.wav", sampleName_.substr(0, 60).c_str(), chop + 1);
         bool ok = writeFileBytes(dir + name, wav.data(), wav.size());
         screen_.message(P_STATUS, ok ? "Chop " + std::to_string(chop + 1) + " saved as WAV" : std::string("Error while saving"));
+        screen_.setText(P_WRITE, ok ? "OK" : "Error: WAV");
+    }
+
+    // 0.19 SAVE LOOP: the chop track over the loop's length at the current tempo, rendered at once (no playing),
+    // with each chop's PITCH, REV, DECAY, FILTER, LEVEL and CHOKE, as the loop sounds. What rings past the end is
+    // laid over the start, so the file loops without a gap. Only the chops: bass, melody and pads are MIDI.
+    void saveLoop()
+    {
+        const size_t frames = src_.frames();
+        if (frames < 2 || info_.count <= 0) { screen_.message(P_STATUS, "load a sample first"); return; }
+        const double sr = (double)src_.sampleRate;
+        const float bpm = bpmNow();
+        int len = loopLenShown_.load(std::memory_order_relaxed);
+        if (len < 4) len = kSteps;
+        len = std::min(len, 1024);
+        const double spStep = sr * 60.0 / bpm / 4.0;
+        const size_t total = (size_t)std::llround(len * spStep);
+        const float swing = hh::STYLES[clamp(set_.style, 0, hh::NUM_STYLES - 1)].swing;
+        const bool choke = getBool(P_CHOKE);
+        const std::vector<float>& dl = src_.L;
+        const std::vector<float>& dr = src_.R.empty() ? src_.L : src_.R;
+        std::vector<float> L(total, 0.f), R(total, 0.f);
+        std::vector<Voice> vs(16);
+        struct Hit { double at; int chop; float vel; int pitch; bool rev; double gate; };
+        std::vector<Hit> hits;
+        for (int n = 0; n < len; ++n)
+        {
+            const int s = n % kSteps;
+            const uint32_t pass = (uint32_t)(n / kSteps);
+            const hh::ChopEv& e = rend_.chop[s];
+            if (e.pad < 0 || e.pad >= info_.count) continue;
+            if (e.cond == 1 && (pass & 1u)) continue;
+            if (e.chance < 1.f && hh::hash01((uint32_t)s, pass, 77u) >= e.chance) continue;
+            double at = n * spStep;
+            if (s & 1) at += (swing - 0.5f) * 2.f * spStep;
+            if (e.off > 0.f) at += e.off * spStep;
+            const int r = std::max(1, (int)e.ratchet);
+            const double gate = std::max(0.25, (double)e.len) * spStep;
+            for (int k = 0; k < r; ++k)
+                hits.push_back({at + k * spStep / r, (int)e.pad, e.vel * (k ? 0.8f : 1.f), (int)e.pitch, e.rev != 0,
+                                r > 1 ? spStep / r : gate});
+        }
+        std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return a.at < b.at; });
+        size_t h = 0;
+        const size_t tail = total + (size_t)(sr * 4.0); // at most 4 s ringing past the end
+        for (size_t i = 0; i < tail; ++i)
+        {
+            while (h < hits.size() && hits[h].at <= (double)i)
+            {
+                const Hit& t = hits[h++];
+                const int c = t.chop;
+                for (Voice& v : vs)
+                    if (v.active && v.release < 0 && (choke || v.chop == c)) { v.release = kChokeFade; v.relLen = kChokeFade; }
+                Voice* slot = nullptr;
+                for (Voice& v : vs) if (!v.active) { slot = &v; break; }
+                if (!slot) { slot = &vs[0]; for (Voice& v : vs) if (v.age > slot->age) slot = &v; }
+                Voice& v = *slot;
+                const float semis = (float)t.pitch + cPitch_[c].load();
+                v = Voice();
+                v.active = true;
+                v.rev = t.rev != cRev_[c].load();
+                v.chop = c;
+                v.a = (double)chopStart_[c];
+                v.b = (double)std::min((size_t)chopEnd_[c], frames);
+                v.pos = v.rev ? v.b - 2.0 : v.a;
+                v.rate = std::pow(2.0, semis / 12.0);
+                v.gate = t.gate;
+                const float d = cDecay_[c].load();
+                v.decayLen = d >= 99.5f ? 0.0 : std::max(0.03, d / 100.0) * (v.b - v.a) / v.rate;
+                v.gain = 0.6f * (0.2f + 0.8f * t.vel) * std::pow(10.f, cLevel_[c].load() / 20.f);
+                const float f = cFilter_[c].load();
+                v.fa = f >= 99.5f ? 1.f : 1.f - std::exp(-2.f * 3.14159265f * cutoffHz(f) / (float)sr);
+                v.relLen = kFadeOut;
+            }
+            if (h >= hits.size() && i >= total)
+            {
+                bool any = false;
+                for (const Voice& v : vs) any = any || v.active;
+                if (!any) break;
+            }
+            float l = 0.f, r = 0.f;
+            for (Voice& v : vs)
+            {
+                if (!v.active) continue;
+                const bool done = v.rev ? v.pos <= v.a + 1.0 : v.pos >= v.b - 1.0;
+                const size_t k = (size_t)v.pos;
+                if (done || v.pos < 0.0 || v.pos + 1.0 >= (double)frames) { v.active = false; continue; }
+                const float fr = (float)(v.pos - (double)k);
+                float a = dl[k] + (dl[k + 1] - dl[k]) * fr;
+                float b = dr[k] + (dr[k + 1] - dr[k]) * fr;
+                if (v.fa < 1.f)
+                {
+                    v.zl1 += v.fa * (a - v.zl1); v.zl2 += v.fa * (v.zl1 - v.zl2); a = v.zl2;
+                    v.zr1 += v.fa * (b - v.zr1); v.zr2 += v.fa * (v.zr1 - v.zr2); b = v.zr2;
+                }
+                float env = v.gain;
+                if (v.age < kFadeIn) env *= (float)v.age / kFadeIn;
+                const double left = (v.rev ? v.pos - v.a : v.b - v.pos) / v.rate;
+                if (left < kFadeOut) env *= (float)(left / kFadeOut);
+                if (v.decayLen > 0.0) env *= (float)std::max(0.0, 1.0 - v.age / v.decayLen);
+                if (v.gate >= 0.0 && v.release < 0 && v.age >= v.gate) v.release = kFadeOut;
+                if (v.release >= 0)
+                {
+                    env *= (float)v.release / (float)v.relLen;
+                    if (--v.release <= 0) { v.active = false; continue; }
+                }
+                l += a * env; r += b * env;
+                v.pos += v.rev ? -v.rate : v.rate;
+                ++v.age;
+            }
+            L[i % total] += l; R[i % total] += r;
+        }
+        const std::string dir = saveFolder();
+        const int bpmI = (int)std::lround(bpm);
+        const std::string base = dir + "/" + sampleName_.substr(0, 60) + " loop " + std::to_string(bpmI) + "bpm";
+        std::string path = base + ".wav";
+        for (int k = 2; k < 100 && ::access(path.c_str(), F_OK) == 0; ++k) path = base + " " + std::to_string(k) + ".wav";
+        std::vector<uint8_t> wav = hh::wavFromBuffer(L, R, src_.sampleRate);
+        const bool ok = writeFileBytes(path, wav.data(), wav.size());
+        char msg[64];
+        std::snprintf(msg, sizeof msg, "Loop saved: %d bars, %d BPM", (len + 15) / 16, bpmI);
+        screen_.message(P_STATUS, ok ? std::string(msg) : std::string("Error while saving"));
         screen_.setText(P_WRITE, ok ? "OK" : "Error: WAV");
     }
 
@@ -1794,6 +1929,8 @@ private:
                 else screen_.message(P_STATUS, "nothing to undo");
             }
             else if (p == P_SAVE) saveChop();
+            else if (p == P_SAVELOOP) saveLoop();
+            else if (p == P_SKIN) screen_.message(P_DIAGINFO, "SKIN: coming soon", 4000);
             else if (p == P_CHMINUS || p == P_CHPLUS)
             {
                 set(P_CHOPS, (float)clamp(getInt(P_CHOPS) + (p == P_CHPLUS ? 1 : -1), 4, 64));
@@ -1855,7 +1992,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.18 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.19 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }

@@ -25,6 +25,7 @@ struct SampleData {
 bool readWav(const std::vector<uint8_t>& buf, SampleData& out, std::string& err, float maxSeconds = 60.f);
 /** A stereo 24-bit WAV of the frames [a, b), reversed and/or pitched (resampled, plain linear) if asked. */
 std::vector<uint8_t> writeWav(const SampleData& s, size_t a, size_t b, bool reverse, int semitones);
+std::vector<uint8_t> wavFromBuffer(const std::vector<float>& L, const std::vector<float>& R, float sampleRate);
 
 // Transient: the strongest attacks; Equal: parts of the same length. How many: CHOPS (4..64).
 enum ChopMode { CM_TRANSIENT, CM_EQUAL, NUM_CHOP_MODES };

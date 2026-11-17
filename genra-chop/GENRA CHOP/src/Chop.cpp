@@ -97,6 +97,34 @@ static void put16(std::vector<uint8_t>& v, uint16_t x) {
 	v.push_back((uint8_t) (x >> 8));
 }
 
+// 0.19 (MPC): a rendered stereo buffer as a 24-bit WAV (SAVE LOOP)
+std::vector<uint8_t> wavFromBuffer(const std::vector<float>& L, const std::vector<float>& R, float sampleRate) {
+	size_t n = L.size();
+	std::vector<uint8_t> v;
+	v.reserve(44 + n * 6);
+	v.insert(v.end(), {'R', 'I', 'F', 'F'});
+	put32(v, (uint32_t) (36 + n * 6));
+	v.insert(v.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+	put32(v, 16);
+	put16(v, 1);
+	put16(v, 2);
+	put32(v, (uint32_t) sampleRate);
+	put32(v, (uint32_t) sampleRate * 6);
+	put16(v, 6);
+	put16(v, 24);
+	v.insert(v.end(), {'d', 'a', 't', 'a'});
+	put32(v, (uint32_t) (n * 6));
+	for (size_t i = 0; i < n; i++)
+		for (int ch = 0; ch < 2; ch++) {
+			float y = std::max(-1.f, std::min(1.f, ch ? R[i] : L[i]));
+			int32_t q = (int32_t) std::lround(y * 8388607.f);
+			v.push_back((uint8_t) (q & 0xff));
+			v.push_back((uint8_t) ((q >> 8) & 0xff));
+			v.push_back((uint8_t) ((q >> 16) & 0xff));
+		}
+	return v;
+}
+
 std::vector<uint8_t> writeWav(const SampleData& s, size_t a, size_t b, bool reverse, int semitones) {
 	b = std::min(b, s.frames());
 	a = std::min(a, b);

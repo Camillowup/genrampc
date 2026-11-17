@@ -78,6 +78,7 @@ def apply_theme(plugin):
     globals().update(t)
 
 
+FOCUS_RED = "ffe8281e"   # 0.19: the focus frame (a chosen field / knob)
 OVERLAY_BG = "ff1e1d1e"  # the overlays' background (the SDK's dark default)
 CENTRED = "horizontallyCentred verticallyCentred"
 LEFT = "left verticallyCentred"
@@ -445,7 +446,8 @@ class Page:
         if name not in KNOB_DEFS:
             KNOB_DEFS[name] = G.component_definition(
                 G.control_actions("menu overlay"),
-                [G.entry("value", "Label", G.label_data("Value", colour, height, CENTRED), lb, "No", "Show", "Always")],
+                [G.entry("value", "Label", G.label_data("Value", colour, height, CENTRED), lb, "No", "Show", "Always"),
+                 focus_frame(w, h)],
                 "00000000")
         self.c.append(G.entry("menu %d" % len(self.c), name, G.obj(("version", 1), ("handleName", "Data")), b, "Yes",
                               "Hide", "Always", remap=[("Data", self.h[param])]))
@@ -500,7 +502,8 @@ class Page:
         if name not in KNOB_DEFS:
             KNOB_DEFS[name] = G.component_definition(
                 G.control_actions("knob overlay"),
-                [G.entry("knob", "Knob", G.knob_filmstrip_data(png, 127), "0 0 %d %d" % (w, h), "No", "Show", "Always")],
+                [G.entry("knob", "Knob", G.knob_filmstrip_data(png, 127), "0 0 %d %d" % (w, h), "No", "Show", "Always"),
+                 focus_frame(w, h)],
                 "00000000")
         self.c.append(G.entry("knob %d" % len(self.c), name, G.obj(("version", 1), ("handleName", "Data")), b, "Yes",
                               "Hide", "Always", remap=[("Data", self.h[param])]))
@@ -518,6 +521,13 @@ class Page:
         comp = G.component_definition([], self.c, self.style["background"])
         return G.obj(("version", 1), ("tabName", name), ("fnKeyIndex", index), ("fnKeySubIndex", sub),
                      ("componentDefinition", comp), ("qlinkBoundsData", list(qlink_bounds)))
+
+
+def focus_frame(w, h):
+    """0.19: the red frame of a chosen field or knob (the MPC draws it while the field has the focus: data wheel)."""
+    data = G.obj(("version", 1), ("backgroundColour", "00000000"), ("outlineColour", FOCUS_RED),
+                 ("backgroundInset", 0.0), ("outlineThickness", 4.0))
+    return G.entry("focus", "Focus", data, "0 0 %d %d" % (w, h), "No", "Show", "WhenFocussed")
 
 
 def slot_x(i):
@@ -549,7 +559,7 @@ def print_page(p, title_x, has_dir_buttons):
 # ------------------------------------------------------------------ GENRA CHOP
 CHOP_FLASH = ["NEW ALL", "NEW DRUMS", "NEW BASS", "NEW MELODY", "NEW PADS", "NEW CHOPS", "UNDO", "SAVE WAV", "CHOPS MINUS",
               "CHOPS PLUS", "STYLE BACK", "STYLE NEXT", "PRINT", "LEARN", "BACK", "DRIVES", "PAGE BACK",
-              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG",
+              "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG", "SAVE LOOP", "SKIN",
               "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4",
               "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"]
 
@@ -603,7 +613,7 @@ def chop_page(p, q2=False):
         p.film(steps, 2, "SCHRITT %d" % (i + 1), "%d 198 72 12" % slot_x(i))
     # the rows: CHOPS, then DRUMS / BASS / MELODY / PADS; each: lamp, name, what it plays, M, the list, a knob, NEW
     p.dark("20 220 560 400")
-    knob = img.knob(58)
+    knob = img.knob(56)
     lamps = img.lamps()
     rows = (("chopsl", "CHOPTEXT", "CHOP PAT", "GRID", "NEW CHOPS", "MUTE CHOPS"),
             ("drums", "SPURTEXT 1", "DRUM MODE", "DENS DRUMS", "NEW DRUMS", "MUTE DRUMS"),
@@ -613,19 +623,22 @@ def chop_page(p, q2=False):
     for k, (cap, txt, mode, dens, new, mute) in enumerate(rows):
         y = 226 + k * 78
         p.film(lamps, 2, "AKTIV %d" % (k + 1), "32 %d 16 16" % (y + 9))
-        if k == 2:  # BASS: OCT -1 / 0 / +1 / +2 beside the name (tap = next)
-            p.caption(cap, "54 %d 70 26" % (y + 4), 19.0, L_CREAM)
-            p.image(p.img.box(GREY, 66, 24), "122 %d 66 24" % (y + 5))
-            p.value("BASS OCT", "122 %d 66 24" % (y + 5), 12.0, L_KEYINK, CENTRED)
-            p.button("OCT TAP", "122 %d 66 24" % (y + 5))
+        p.caption(cap, "54 %d 90 26" % (y + 4), 19.0, L_CREAM)
+        if k == 2:  # BASS: OCT as a key under the name, 40 high (tap = next)
+            p.image(p.img.box(GREY, 106, 40), "32 %d 106 40" % (y + 34))
+            p.value("BASS OCT", "32 %d 106 40" % (y + 34), 16.0, L_KEYINK, CENTRED)
+            p.button("OCT TAP", "32 %d 106 40" % (y + 34))
         else:
-            p.caption(cap, "54 %d 136 26" % (y + 4), 19.0, L_CREAM)
-        p.value(txt, "32 %d 160 20" % (y + 31), 12.0, L_CREAM_MUTED)
-        p.toggle(mute, "m", "32 %d 46 22" % (y + 52), 13.0)
-        p.lcd("196 %d 200 62" % y)
-        p.menu(mode, "196 %d 200 62" % y, 17.0, L_LCD)
-        p.knob_only(dens, "402 %d 58 58" % (y + 2), knob)
-        p.value(dens, "462 %d 46 62" % y, 14.0, L_CREAM, CENTRED)
+            p.value(txt, "32 %d 108 20" % (y + 36), 12.0, L_CREAM_MUTED)
+        p.toggle(mute, "m", "142 %d 48 62" % y, 18.0)  # 0.19: M the whole row high
+        # 0.19: < > beside the field again (44 wide); tap on the field = chosen (red frame, data wheel), 2x = the list
+        back, nxt = ("PAT BACK", "PAT NEXT") if k == 0 else ("MODE BACK %d" % k, "MODE NEXT %d" % k)
+        p.key(back, GREY, "prev", "196 %d 44 62" % y, 26.0, L_KEYINK)
+        p.lcd("244 %d 112 62" % y)
+        p.menu(mode, "244 %d 112 62" % y, 15.0, L_LCD)
+        p.key(nxt, GREY, "next", "360 %d 44 62" % y, 26.0, L_KEYINK)
+        p.knob_only(dens, "408 %d 56 56" % (y + 3), knob)
+        p.value(dens, "464 %d 44 62" % y, 14.0, L_CREAM, CENTRED)
         p.key(new, RED, "new", "512 %d 64 62" % y, 18.0)
     # STYLE (a list on a double tap, < > beside it), NEW ALL, UNDO
     p.caption("style", "600 220 120 20", 15.0, L_MUTED)
@@ -662,14 +675,15 @@ def chop_page(p, q2=False):
     p.value("CHOPINFO", "612 472 640 26", 14.0, L_CREAM)
     for i, param in enumerate(("PITCH", "DECAY", "FILTER", "LEVEL")):
         p.knob(param, 600 + i * 165, 506, 64)
-    p.lcd("600 582 330 38")
-    p.value("STATUS", "608 582 318 38", 14.0, L_LCD)
-    p.toggle("REC", "rec", "936 582 100 38", 15.0)
-    p.film(img.two(GREY, lighter(GREY, 55), 104, 38), 2, p.flashes["CLEAR"], "1042 582 104 38")
-    p.caption("clear", "1042 582 104 24", 14.0, L_KEYINK, CENTRED)
-    p.caption("clearsub", "1042 603 104 16", 10.0, L_KEYINK, CENTRED)
-    p.button("CLEAR", "1042 582 104 38")
-    p.key("SAVE WAV", GREY, "savewav", "1152 582 108 38", 14.0, L_KEYINK)
+    p.lcd("600 582 220 38")
+    p.value("STATUS", "608 582 208 38", 13.0, L_LCD)
+    p.toggle("REC", "rec", "826 582 100 38", 15.0)
+    p.film(img.two(GREY, lighter(GREY, 55), 104, 38), 2, p.flashes["CLEAR"], "932 582 104 38")
+    p.caption("clear", "932 582 104 24", 14.0, L_KEYINK, CENTRED)
+    p.caption("clearsub", "932 603 104 16", 10.0, L_KEYINK, CENTRED)
+    p.button("CLEAR", "932 582 104 38")
+    p.key("SAVE WAV", GREY, "savewav", "1042 582 106 38", 14.0, L_KEYINK)   # caption: SAVE CHOP
+    p.key("SAVE LOOP", GREY, "saveloop", "1154 582 106 38", 14.0, L_KEYINK)
 
 
 def chop_browser(p):
@@ -742,7 +756,8 @@ def chop_setup(p):
         p.caption(key, "470 %d 220 60" % y, 24.0, L_CREAM_MUTED)
         p.value(param, "690 %d 560 60" % y, 24.0, L_CREAM)
     # DIAG: a 2-minute capture of what the MPC offers and sends, written to Genra/logs/ (genra_diag.h)
-    p.key("DIAG", RED, "diag", "20 400 400 90", 30.0)
+    p.key("DIAG", RED, "diag", "20 400 195 90", 30.0)
+    p.key("SKIN", KEY_OFF, "skin", "225 400 195 90", 30.0)  # 0.19: colours later ("SKIN: coming soon")
     p.value("DIAGINFO", "20 500 400 50", 20.0, L_DARK)
 
 
@@ -750,7 +765,7 @@ def chop_setup(p):
 SCHLAG_FLASH = ["NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT",
                 "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP", "SAMPLE BACK", "SAMPLE NEXT",
                 "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT",
-                "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2", "COPY BAR", "PASTE", "CLEAR BAR"]
+                "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2", "COPY BAR", "PASTE", "CLEAR BAR", "DIAG", "SKIN"]
 DEAD_VOICES = {6: 4}  # TOM: a dying display (value: the damage pattern)
 
 
@@ -786,7 +801,7 @@ def schlag_main(p, funcs=False, all_slots=False):
     p.key("UNDO", GREY, "undo", "918 9 90 46", 19.0, L_KEYINK)
     p.key("NEW", RED, "new", "1016 9 140 46", 24.0)
     p.key_sub("BASIC", KEY_OFF, "basic", "twice", "1164 9 96 46", 16.0, 10.0)
-    lamps, ring, small = img.lamps(), img.ring(100), img.knob(58)
+    lamps, ring, small = img.lamps(), img.ring(84), img.knob(54)
     meter = img.bar_meter(129, 10, 21)
     for v in range(8):
         x, w = 20 + v * 155, 145
@@ -798,37 +813,37 @@ def schlag_main(p, funcs=False, all_slots=False):
         p.value("STIMMNAME ROT %d" % (v + 1), "%d 70 110 30" % (x + 10), 17.0 if v == 5 else 20.0, L_RED)
         p.film(lamps, 2, "LAMPE %d" % (v + 1), "%d 77 16 16" % (x + w - 22))
         p.button("WAHL %d" % (v + 1), "%d 66 %d 34" % (x, w))
-        p.toggle("M %d" % (v + 1), "m", "%d 102 62 28" % (x + 8), 17.0)
-        p.toggle("S %d" % (v + 1), "s", "%d 102 62 28" % (x + 75), 17.0)
+        p.toggle("M %d" % (v + 1), "m", "%d 102 62 36" % (x + 8), 18.0)
+        p.toggle("S %d" % (v + 1), "s", "%d 102 62 36" % (x + 75), 18.0)
         # < >: the previous / next sample of the voice's folder (wide, to the middle)
-        p.key("VOICE PREV %d" % (v + 1), GREY, "lt", "%d 138 62 40" % (x + 8), 26.0, L_KEYINK)
-        p.key("VOICE NEXT %d" % (v + 1), GREY, "gt", "%d 138 62 40" % (x + 75), 26.0, L_KEYINK)
+        p.key("VOICE PREV %d" % (v + 1), GREY, "lt", "%d 142 62 40" % (x + 8), 26.0, L_KEYINK)
+        p.key("VOICE NEXT %d" % (v + 1), GREY, "gt", "%d 142 62 40" % (x + 75), 26.0, L_KEYINK)
         # the voice's 16 steps of the bar that plays, a red line under the step that plays
         p.lcd("%d 186 129 24" % (x + 8), dead and dead + 2)
         cells = img.drum_cells(bool(dead))
         for j in range(16):
             p.film(cells, 6, "ZELLE %d %d" % (v + 1, j + 1), "%d 189 6 18" % (x + 11 + int(round(j * 7.9))))
-        p.value("RINGTEXT %d" % (v + 1), "%d 249 60 30" % (x + 42), 17.0, L_CREAM, CENTRED)
-        p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 214 100 100" % (x + 22), ring)
+        p.value("RINGTEXT %d" % (v + 1), "%d 241 60 30" % (x + 42), 17.0, L_CREAM, CENTRED)
+        p.knob_only("RANDOM %s" % VOICE_NAMES[v], "%d 214 84 84" % (x + 30), ring)
         # what RANDOM does: a list on a double tap
-        p.lcd("%d 318 80 28" % (x + 8), dead)
-        p.menu("KIND %s" % VOICE_NAMES[v], "%d 318 80 28" % (x + 8), 12.0, ink)
-        hb = "%d 318 45 28" % (x + 92)
-        p.film(img.state(1, 2, 45, 28), 2, "LIVE %s" % VOICE_NAMES[v], hb)
+        p.lcd("%d 302 80 40" % (x + 8), dead)
+        p.menu("KIND %s" % VOICE_NAMES[v], "%d 302 80 40" % (x + 8), 13.0, ink)
+        hb = "%d 302 45 40" % (x + 92)
+        p.film(img.state(1, 2, 45, 40), 2, "LIVE %s" % VOICE_NAMES[v], hb)
         p.value("LIVE %s" % VOICE_NAMES[v], hb, 12.0, L_WHITE, CENTRED)
         p.button("LIVE %s" % VOICE_NAMES[v], hb, 1, 1)
-        p.key("ROLL %d" % (v + 1), KEY_OFF, "roll", "%d 352 129 26" % (x + 8), 14.0)
+        p.key("ROLL %d" % (v + 1), KEY_OFF, "roll", "%d 346 129 34" % (x + 8), 15.0)
         # two function slots: the name (a list on a double tap), a knob, its value; "+n" = more functions in use
         for k in range(2):
-            y = 386 + k * 100
-            fb = "%d %d 129 30" % (x + 8, y)
+            y = 384 + k * 102
+            fb = "%d %d 129 40" % (x + 8, y)
             p.lcd(fb, dead)
             if k == 0:
-                p.value("MEHR %d" % (v + 1), "%d %d 30 30" % (x + 105, y), 13.0, L_RED, CENTRED)
-            p.menu("FUNCTION %d %d" % (v + 1, k + 1), fb, 16.0, ink, "0 0 104 30" if k == 0 else None)
-            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 58 58" % (x + 8, y + 36), small)
-            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 72 58" % (x + 68, y + 36), 16.0, L_CREAM, CENTRED)
-        p.caption("lvl", "%d 584 80 13" % (x + 8), 10.0, L_CREAM_MUTED)
+                p.value("MEHR %d" % (v + 1), "%d %d 30 40" % (x + 105, y), 13.0, L_RED, CENTRED)
+            p.menu("FUNCTION %d %d" % (v + 1, k + 1), fb, 16.0, ink, "0 0 104 40" if k == 0 else None)
+            p.knob_only("VALUE %d %d" % (v + 1, k + 1), "%d %d 54 54" % (x + 8, y + 44), small)
+            p.value("VALUE %d %d" % (v + 1, k + 1), "%d %d 72 54" % (x + 68, y + 44), 16.0, L_CREAM, CENTRED)
+        p.caption("lvl", "%d 586 80 13" % (x + 8), 10.0, L_CREAM_MUTED)
         p.film(meter, 21, "LEVELBALKEN %d" % (v + 1), "%d 600 129 10" % (x + 8))
 
 
@@ -890,10 +905,10 @@ def schlag_steps(p):
     knob = img.knob(58)
     for k, kx in enumerate((320, 600)):
         n = k + 1
-        p.key("FN BACK %d" % n, GREY, "lt", "%d %d 36 40" % (kx, y + 14), 22.0, L_KEYINK)
-        p.lcd("%d %d 180 40" % (kx + 40, y + 14))
-        p.menu("STEP FN %d" % n, "%d %d 180 40" % (kx + 40, y + 14), 18.0, L_LCD)
-        p.key("FN NEXT %d" % n, GREY, "gt", "%d %d 36 40" % (kx + 224, y + 14), 22.0, L_KEYINK)
+        p.key("FN BACK %d" % n, GREY, "lt", "%d %d 44 40" % (kx, y + 14), 22.0, L_KEYINK)
+        p.lcd("%d %d 164 40" % (kx + 48, y + 14))
+        p.menu("STEP FN %d" % n, "%d %d 164 40" % (kx + 48, y + 14), 17.0, L_LCD)
+        p.key("FN NEXT %d" % n, GREY, "gt", "%d %d 44 40" % (kx + 216, y + 14), 22.0, L_KEYINK)
         p.knob_only("STEP KNOB %d" % n, "%d %d 58 58" % (kx + 10, y + 74), knob)
         p.value("STEPFNWERT %d" % n, "%d %d 180 50" % (kx + 80, y + 78), 22.0, L_CREAM)
     p.caption("listhelp", "320 %d 300 14" % (y + 58), 10.0, L_CREAM_MUTED)
@@ -928,10 +943,10 @@ def schlag_folder(p):
         p.film(rows, 3, "ZEILENLICHT %d" % (r + 1), "20 %d 600 48" % y)
         p.value("ZEILE %d" % (r + 1), "34 %d 580 48" % y, 22.0, L_CREAM)
         p.button("TIPP %d" % (r + 1), "20 %d 600 48" % y)
-    p.key("PAGE BACK", GREY, "pgup", "20 584 240 36", 17.0, L_KEYINK)
-    p.dark("266 584 108 36")
-    p.value("SEITE", "266 584 108 36", 16.0, L_CREAM, CENTRED)
-    p.key("PAGE NEXT", GREY, "pgdn", "380 584 240 36", 17.0, L_KEYINK)
+    p.key("PAGE BACK", GREY, "pgup", "20 576 240 44", 18.0, L_KEYINK)
+    p.dark("266 576 108 44")
+    p.value("SEITE", "266 576 108 44", 16.0, L_CREAM, CENTRED)
+    p.key("PAGE NEXT", GREY, "pgdn", "380 576 240 44", 18.0, L_KEYINK)
     # the voice: its sample, folder and how many samples RANDOM has
     p.dark("640 110 620 92")
     p.value("STIMMINFO", "656 112 120 34", 22.0, L_RED)
@@ -971,7 +986,11 @@ def schlag_setup(p):
     p.value("LERNINFO", "20 210 400 44", 24.0, L_DARK)
     for i in range(4):
         p.caption("help%d" % (i + 1), "20 %d 400 32" % (262 + i * 32), 20.0, L_MUTED)
-    p.toggle("HAT CHOKE", "choke", "20 410 400 70", 24.0)
+    p.toggle("HAT CHOKE", "choke", "20 400 400 70", 24.0)
+    # 0.16: DIAG (as in GENRA CHOP) and SKIN (colours later)
+    p.key("DIAG", RED, "diag", "20 482 195 90", 30.0)
+    p.key("SKIN", KEY_OFF, "skin", "225 482 195 90", 30.0)
+    p.value("DIAGINFO", "20 580 400 36", 18.0, L_DARK)
     p.toggle("MPC KIT NOTES", "kitnotes", "450 440 400 70", 22.0)
     for i in range(3):
         p.caption("kithelp%d" % (i + 1), "870 %d 390 28" % (440 + i * 28), 17.0, L_MUTED)
