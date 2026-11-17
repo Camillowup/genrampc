@@ -67,6 +67,8 @@ learned pads live in `<drive>/Genra/` and are kept.
   knob editor.
 - **Lists:** a choice field (MODE, PAT, STYLE, LENGTH, the RANDOM kind, a function slot, the STEPS knobs' functions):
   **double tap** it (or Enter) for the MPC's list of all choices.
+- **Chosen:** a single tap on a list field or a knob puts a **red frame** around it; then the **data wheel** steps
+  or turns it.
 - **Keys that erase** (CLEAR, CLEAR ALL, BASIC, EMPTY) need **a second tap** within 3 seconds.
 - Keys flash when tapped. Long texts end in `~`.
 - **The shared folder `<drive>/Genra/`** (next to `VST2 Plugins`, never touched by updates):
@@ -174,6 +176,12 @@ into the MPC sequence first.
 - **REC** (the plugin's own key) – arm it, press Play: one bar count-in, then your pad hits go into GENRA's chop
   pattern, **snapped to 16ths**, pass after pass (overdub); UNDO takes back the last pass. GENRA then plays them with
   the style's swing. Use it to sketch; to keep your exact timing, record with the MPC as above.
+
+- **SAVE CHOP** – the selected chop as a WAV. **SAVE LOOP** – the chop track over the loop's length (LENGTH) at the
+  current tempo, as it sounds (PITCH, REV, DECAY, FILTER, LEVEL, CHOKE), rendered at once without playing:
+  `<sample> loop <BPM>bpm.wav`, a number added if it exists. What rings past the end is laid over the start, so the
+  file loops without a gap. Only the chops – bass, melody and pads are MIDI; for everything, resample on the MPC.
+  Both write into `GENRA CHOP/` next to the sample, or the folder set with SAVE HERE.
 
 ### 4.6 STYLE page
 
