@@ -68,7 +68,11 @@ static const char* const kCaptions[][2] = {
     {"r6", "SAVE WAV to"}, {"r7", "MPC"}, {"r8", "Version"}, {"qlpage2", "Q-LINKS 2: GRID, PAT, OCT ..."}, {"diag", "DIAG"}, {"styletitle", "· STYLE"}, {"length", "LENGTH"},
     {"len1", "1 BAR"}, {"len2", "2 BARS"}, {"len4", "4 BARS"}, {"len8", "8 BARS"},
     {"era0", "80s"}, {"era1", "90s"}, {"era2", "2000s"}, {"era3", "2010s"}, {"era4", "2020s"}, {"lenauto", "AUTO"}, {"loadsmp", "LOAD SAMPLE"},
-    {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"}};
+    {"clear", "CLEAR"}, {"rec", "● REC"}, {"chopsl", "CHOPS"},
+    // 0.18: the new main page
+    {"ql1", "Q-LINKS 1"}, {"ql1s", "press CHOP: set 2"}, {"ql2", "Q-LINKS 2"}, {"ql2s", "press CHOP: set 1"},
+    {"lensub", "LENGTH"}, {"autosub", "GENRA plays the chops"}, {"padssub", "you play the chops"}, {"m", "M"},
+    {"clearsub", "tap twice"}, {"listsub", "2x tap = list"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 // the keys that flash when tapped (in this order: FLASH 1.. in the skin)
@@ -77,6 +81,7 @@ static const char* const kFlashKeys[] = {"NEW ALL", "NEW DRUMS", "NEW BASS", "NE
     "DRIVES", "PAGE BACK", "PAGE NEXT", "SAVE HERE", "PRINT HERE", "PRINT STANDARD", "LOAD SAMPLE", "CLEAR", "DIAG",
     "MODE BACK 1", "MODE BACK 2", "MODE BACK 3", "MODE BACK 4", "MODE NEXT 1", "MODE NEXT 2", "MODE NEXT 3", "MODE NEXT 4"};
 static const int kNumFlash = (int)(sizeof(kFlashKeys) / sizeof(kFlashKeys[0]));
+static const int kRowsM = 5; // 0.18: the rows with M and a lamp: CHOPS + the four lanes
 
 enum
 {
@@ -87,8 +92,9 @@ enum
     P_CHOPGRID,                        // GRID: AUTO (the style) or the chops on 1/4, 1/8, 1/16 (acts with NEW, like PAT)
     P_LANEMODE0,                       // per lane: DRUMS KIT/BREAK/BOTH, BASS FOLLOW.., MELODY STAB.., PADS SUSTAIN..
     P_DENS0 = P_LANEMODE0 + kLanes,    // per lane: DENSITY 0..100 % (50 = the style)
+    P_MUTE0 = P_DENS0 + kLanes,        // 0.18: M per row: CHOPS, DRUMS, BASS, MELODY, PADS (sound, MIDI OUT and LINK)
     // buttons (every tap flips them); the first kNumFlash have a flash, in kFlashKeys' order
-    P_NEWALL = P_DENS0 + kLanes, P_NEW0,
+    P_NEWALL = P_MUTE0 + kRowsM, P_NEW0,
     P_NEWCHOPS = P_NEW0 + kLanes, // NEW of the CHOPS row: built like the other NEW keys (with its flash)
     P_UNDO, P_SAVE, P_CHMINUS, P_CHPLUS, P_STPREV, P_STNEXT, P_PRINT, P_LEARN,
     P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_SAVEHERE, P_PRINTHERE, P_PRINTSTD, P_LOADSMP, P_CLEAR, P_DIAG,
@@ -100,7 +106,9 @@ enum
     P_PATH = P_SLOTTAP0 + kPads,
     P_LISTINFO, P_LOADED, P_HDR, P_CHOPSTXT, P_BARTXT, P_STATUS, P_LEARNINFO, P_MAPINFO, P_DRIVES, P_WRITE,
     P_LINKINFO, P_ANALYSE, P_SAVEDIRTXT, P_PRINTDIRTXT, P_PRINTINFO, P_PRINTSTATUS, P_HOSTINFO, P_STYLEHDR, P_CHOPTXT, P_VERSION, P_DIAGINFO,
-    P_STYLENAME0,
+    P_CHOPINFO,                        // 0.18: the line over PITCH .. LEVEL: the chop they act on
+    P_BANKTXT0,                        // 0.18: dots under BANK A-D: how full each bank is
+    P_STYLENAME0 = P_BANKTXT0 + 4,
     P_SLOTTXT0 = P_STYLENAME0 + hh::NUM_STYLES,
     P_SLOTLEN0 = P_SLOTTXT0 + kPads,
     P_LANETXT0 = P_SLOTLEN0 + kPads,
@@ -114,7 +122,9 @@ enum
     P_CELL0 = P_STEPLIT0 + kPads,      // lane x step: 0 empty, 1 note, +2 the step that plays
     P_LAMP0 = P_CELL0 + kLanes * kPads,
     P_REVLIT = P_LAMP0 + kLanes, P_LOCKLIT,
-    P_FLASH0,
+    P_BARLIT0,                         // 0.18: the four bar lamps in the header
+    P_ACT0 = P_BARLIT0 + 4,            // 0.18: a lamp per row (CHOPS, DRUMS .. PADS) while it plays
+    P_FLASH0 = P_ACT0 + kRowsM,
     P_COUNT = P_FLASH0 + kNumFlash
 };
 
@@ -250,6 +260,12 @@ public:
             for (char& c : id) c = c == ' ' ? '_' : (char)::tolower((unsigned char)c);
             addParam(floatParam(id.c_str(), d, 0.f, 100.f, 50.f, "%", 0));
         }
+        for (const char* d : {"MUTE CHOPS", "MUTE DRUMS", "MUTE BASS", "MUTE MELODY", "MUTE PADS"})
+        {
+            std::string id = d;
+            for (char& c : id) c = c == ' ' ? '_' : (char)::tolower((unsigned char)c);
+            addParam(boolParam(id.c_str(), d, false));
+        }
         const char* lanes[kLanes] = {"DRUMS", "BASS", "MELODY", "PADS"};
         addButton("NEW ALL");
         for (int k = 0; k < kLanes; ++k) addButton((std::string("NEW ") + lanes[k]).c_str());
@@ -270,8 +286,9 @@ public:
         for (int i = 0; i < kPads; ++i) addButton(("SLOT " + std::to_string(i + 1)).c_str());
         for (const char* t : {"PFAD", "LISTINFO", "GELADEN", "KOPF", "CHOPZAHL", "TAKT", "STATUS", "LERNINFO",
                               "BELEGUNG", "LAUFWERKSLISTE", "SCHREIBEN", "LINKINFO", "ANALYSE", "SPEICHERORT",
-                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF", "CHOPTEXT", "VERSION", "DIAGINFO"})
+                              "PRINTORDNER", "PRINTINFO", "PRINTSTATUS", "HOSTINFO", "STYLEKOPF", "CHOPTEXT", "VERSION", "DIAGINFO", "CHOPINFO"})
             addText(t);
+        for (int i = 0; i < 4; ++i) addText(("BANKTEXT " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < hh::NUM_STYLES; ++i) addText(("STYLENAME " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTTEXT " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kPads; ++i) addText(("SLOTLAENGE " + std::to_string(i + 1)).c_str());
@@ -287,6 +304,8 @@ public:
         for (int k = 0; k < kLanes; ++k) addText(("LAMPE " + std::to_string(k + 1)).c_str());
         addText("REVLICHT");
         addText("LOCKLICHT");
+        for (int i = 0; i < 4; ++i) addText(("TAKTLICHT " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kRowsM; ++i) addText(("AKTIV " + std::to_string(i + 1)).c_str());
         for (int i = 0; i < kNumFlash; ++i) addText(("BLITZ " + std::to_string(i + 1)).c_str());
         if (numParams() != P_COUNT) std::abort(); // the enum and the list above must agree (host_sim catches it)
 
@@ -298,9 +317,11 @@ public:
         for (int i = 0; i < kPads; ++i) { screen_.strip(P_SLOTLIT0 + i, 3); screen_.strip(P_STEPLIT0 + i, 2); }
         for (int i = 0; i < kLanes * kPads; ++i) screen_.strip(P_CELL0 + i, 4);
         for (int i = 0; i < kLanes; ++i) screen_.strip(P_LAMP0 + i, 2);
+        for (int i = 0; i < 4; ++i) screen_.strip(P_BARLIT0 + i, 2);
+        for (int i = 0; i < kRowsM; ++i) screen_.strip(P_ACT0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.17 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.18 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -532,7 +553,7 @@ public:
                     // 0.15: PADS silences only the chop pattern (the pads play the chops); bass, melody, pads and
                     // drums go on, also on MIDI OUT
                     const uint32_t pass = (uint32_t)((n - pos) / len);
-                    if (autoMode) scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
+                    if (autoMode && !getBool(P_MUTE0)) scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
                     scheduleMidi(*seq_, s, pass, at, spStep);
                 }
                 nextStep_ += 1.0;
@@ -773,26 +794,27 @@ private:
             if (cond == 1 && (round & 1u)) return false;
             return chance >= 1.f || hh::hash01((uint32_t)s, round, seed) < chance;
         };
+        const bool mB = getBool(P_MUTE0 + 2), mM = getBool(P_MUTE0 + 3), mP = getBool(P_MUTE0 + 4), mD = getBool(P_MUTE0 + 1);
         const hh::Note& b = q.bass[s];
-        if (b.pitch >= 0 && plays(b.chance, b.cond, 101u))
+        if (!mB && b.pitch >= 0 && plays(b.chance, b.cond, 101u))
         {
             double t = at + sw + std::max(0.f, b.off) * spStep;
             queueMidi(t, t + q.bassLen[s] * spStep, kChBass, b.pitch, std::min(1.f, b.vel * (b.acc ? 1.f : 0.85f)));
         }
         const hh::Note& m = q.mel[s];
-        if (m.pitch >= 0 && plays(m.chance, m.cond, 102u))
+        if (!mM && m.pitch >= 0 && plays(m.chance, m.cond, 102u))
         {
             double t = at + sw + std::max(0.f, m.off) * spStep;
             queueMidi(t, t + q.melLen[s] * spStep, kChMel, m.pitch, std::min(1.f, m.vel * (m.acc ? 1.f : 0.85f)));
         }
         const hh::PadEv& p = q.pad[s];
-        if (p.pitch[0] >= 0 && plays(p.chance, p.cond, 103u))
+        if (!mP && p.pitch[0] >= 0 && plays(p.chance, p.cond, 103u))
         {
             double t = at + sw + std::max(0.f, p.off) * spStep;
             for (int v = 0; v < hh::PAD_VOICES; ++v)
                 if (p.pitch[v] >= 0) queueMidi(t, t + std::max(0.5f, p.len) * spStep * 0.98, kChPads, p.pitch[v], p.vel);
         }
-        const bool drumsOff = drumsMuted_.load(std::memory_order_relaxed); // SCHLAG in TRACK: its track plays the drums
+        const bool drumsOff = mD || drumsMuted_.load(std::memory_order_relaxed); // SCHLAG in TRACK: its track plays the drums
         for (int d = 0; d < hh::DRUMS && !drumsOff; ++d)
         {
             const hh::Hit& h = q.drum[d][s];
@@ -1230,7 +1252,7 @@ private:
             {
                 const hh::Hit& h = rend_.drum[v][i];
                 genralink::DrumHit& d = l.drum[v][i];
-                d.vel = (uint8_t)clamp((int)std::lround(h.vel * 127.f), 0, 127);
+                d.vel = getBool(P_MUTE0 + 1) ? 0 : (uint8_t)clamp((int)std::lround(h.vel * 127.f), 0, 127); // 0.18: M DRUMS
                 d.off = (int8_t)clamp((int)std::lround(h.off * 100.f), -50, 50);
                 d.ratchet = (uint8_t)clamp((int)h.ratchet, 1, 8);
                 d.chance = (uint8_t)clamp((int)std::lround(h.chance * 255.f), 0, 255);
@@ -1404,14 +1426,26 @@ private:
         int s = clamp(sel_, 0, std::max(0, info_.count - 1));
         if (info_.count > 0)
         {
-            std::string st = "CHOP " + std::to_string(s + 1) + " · " + chordText(s) + " · " + lengthText(info_.chop[s].seconds, bpm);
+            // 0.18: the chop PITCH .. LEVEL act on, in its own line; STATUS keeps the messages
+            const char bank = (char)('A' + s / kPads);
+            std::string st = std::string("CHOP ") + bank + std::to_string(s % kPads + 1) + " · " + chordText(s) + " · "
+                           + lengthText(info_.chop[s].seconds, bpm);
             if (cRev_[s].load()) st += " · REV";
             if (padSet_[s].lock) st += " · LOCK";
-            screen_.setText(P_STATUS, st);
+            screen_.setText(P_CHOPINFO, st + "   (the pad played last)");
             screen_.setFrame(P_REVLIT, cRev_[s].load() ? 1 : 0);
             screen_.setFrame(P_LOCKLIT, padSet_[s].lock ? 1 : 0);
+            screen_.setText(P_STATUS, std::string(getInt(P_AUTO) == 0 ? "AUTO" : "PADS") + " · PAT "
+                            + hh::CHOP_PAT_NAMES[clamp(getInt(P_CHOPPAT), 0, hh::NUM_CHOP_PATS - 1)]);
         }
-        else screen_.setText(P_STATUS, "no sample");
+        else { screen_.setText(P_CHOPINFO, "no sample: BROWSER, LOAD SAMPLE"); screen_.setText(P_STATUS, "no sample"); }
+        for (int b = 0; b < 4; ++b)
+        {
+            const int n = clamp(info_.count - b * kPads, 0, kPads);
+            std::string d;
+            for (int i = 0; i < (n + 3) / 4; ++i) d += i ? " •" : "•";
+            screen_.setText(P_BANKTXT0 + b, d);
+        }
         int rs = recState_.load();
         if (rs == 1) screen_.setText(P_STATUS, "REC armed: press Play");
         else if (rs == 2) screen_.setText(P_STATUS, "REC: count-in ...");
@@ -1420,7 +1454,27 @@ private:
         int step = curStep_.load();
         int bar = step >= 0 ? step / hh::STEPS : 0;
         int bars = std::max(1, (loopLenShown_.load() + hh::STEPS - 1) / hh::STEPS);
-        screen_.setText(P_BARTXT, step >= 0 ? "Bar " + std::to_string(bar + 1) + " / " + std::to_string(std::min(bars, 4)) : std::string("Stop"));
+        screen_.setText(P_BARTXT, step >= 0 ? "BAR " + std::to_string(bar + 1) + " · " + std::to_string(step % hh::STEPS + 1) : std::string("STOP"));
+        for (int b = 0; b < 4; ++b) screen_.setFrame(P_BARLIT0 + b, step >= 0 && b == bar ? 1 : 0);
+        {
+            // 0.18: a row's lamp is lit while it plays (a note on this step or the one before), not while muted
+            const int st0 = step >= 0 ? step : -1;
+            for (int r = 0; r < kRowsM; ++r)
+            {
+                bool on = false;
+                for (int d = 0; d < 2 && st0 >= 0 && !on; ++d)
+                {
+                    const int q = ((st0 - d) % kSteps + kSteps) % kSteps;
+                    if (r == 0) on = rend_.chop[q].pad >= 0 && getInt(P_AUTO) == 0;
+                    else if (r == 1) { for (int v = 0; v < hh::DRUMS; ++v) if (rend_.drum[v][q].vel > 0.f) on = true; }
+                    else if (r == 2) on = rend_.bass[q].pitch >= 0;
+                    else if (r == 3) on = rend_.mel[q].pitch >= 0;
+                    else on = rend_.pad[q].pitch[0] >= 0;
+                }
+                screen_.setFrame(P_ACT0 + r, on && !getBool(P_MUTE0 + r) ? 1 : 0);
+            }
+        }
+        (void)bars;
         for (int j = 0; j < kPads; ++j)
         {
             int st = bar * hh::STEPS + j;
@@ -1712,6 +1766,11 @@ private:
             if (lastGrid_ < 0) lastGrid_ = g;
             else if (g != lastGrid_) { lastGrid_ = g; gridChanged(); }
         }
+        {
+            // 0.18: M DRUMS reaches SCHLAG over LINK at once (the other rows act in the audio thread)
+            const bool md = getBool(P_MUTE0 + 1);
+            if (md != lastDrumMute_) { lastDrumMute_ = md; publishLoop(true); }
+        }
         for (auto& t : screen_.taps())
         {
             const int p = t.first;
@@ -1758,9 +1817,12 @@ private:
             }
             else if (p == P_CLEAR)
             {
+                const long long t = nowMs();
                 if (hostPlaying_.load()) screen_.message(P_STATUS, "CLEAR: stop the MPC first");
+                else if (t - clearArmed_ > 3000) { clearArmed_ = t; screen_.message(P_STATUS, "CLEAR: tap again to empty the loop", 3000); }
                 else
                 {
+                    clearArmed_ = 0;
                     undoPat_ = pat_;
                     hasUndo_ = true;
                     pat_.clear();
@@ -1793,7 +1855,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.17 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.18 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }
@@ -1911,6 +1973,8 @@ private:
     double recFrom_ = 0.0;                        // audio thread: REC writes from this step on (after the count-in)
     std::atomic<double> recFromShared_{0.0};
     bool recWas_ = false;
+    long long clearArmed_ = 0;                    // 0.18: CLEAR needs a second tap within 3 s
+    bool lastDrumMute_ = false;
     bool recTook_ = false;                        // worker: hits came in during this recording (0.15)
     int recSeen_ = 0;
     long recPass_ = -1;                           // worker: the pass being recorded (UNDO takes it back)

@@ -43,7 +43,8 @@ using namespace genrafiles;
 namespace {
 
 static const int kVoices = 8, kSlots = 2, kSteps = genralink::kSteps, kRows = 8, kPrintRows = 7;
-static const int kMaxFiles = 128, kFlashes = 26;
+static const int kSegs = 3, kChips = 4, kLvlFrames = 21; // 0.15
+static const int kMaxFiles = 128, kFlashes = 29; // 0.15: + COPY BAR, PASTE, CLEAR BAR
 static const size_t kMaxVoiceBytes = 16u << 20; // the samples of one voice: at most 16 MB in memory
 // MIDI channel 10 (GENRA CHOP OUT): the notes of pads A01-A08 of a new MPC drum program, voice order KICK .. PERC
 const int kKitNote[8] = {37, 36, 42, 82, 40, 38, 46, 44};
@@ -93,7 +94,15 @@ static const char* const kCaptions[][2] = {
     {"lk6", "PAN"}, {"lk7", "REVERSE"}, {"lk8", "FILTER"}, {"qlfuncs", "Q-LINKS: FUNCTIONS"},
     {"steph1", "tap a step to set its own values"}, {"steph2", "— = the main page's value"}, {"lk9", "LEVEL"},
     {"lk10", "CHANCE"}, {"smpcap", "SAMPLE"}, {"condcap", "CONDITION"}, {"hit1", "HIT"}, {"hit2", "ON / OFF"},
-    {"lt", "<"}, {"gt", ">"}, {"qlall", "Q-LINKS: ALL SLOTS 1-8 / 9-16"}, {"clearall", "CLEAR ALL"}, {"empty", "EMPTY"}, {"loadkit", "LOAD KIT"}};
+    {"lt", "<"}, {"gt", ">"}, {"qlall", "Q-LINKS: ALL SLOTS 1-8 / 9-16"}, {"clearall", "CLEAR ALL"}, {"empty", "EMPTY"}, {"loadkit", "LOAD KIT"},
+    // 0.15: the new pages
+    {"twice", "tap twice"}, {"preview", "PREVIEW"}, {"roll", "ROLL"}, {"lvl", "LEVEL"}, {"ql0", "Q: RANDOM / LEVEL"},
+    {"ql0s", "press SCHLAG: voice"}, {"ql1s", "press SCHLAG: all slots"}, {"ql2", "Q: ALL SLOTS"},
+    {"ql2s", "press SCHLAG: RANDOM"}, {"draw", "DRAW"}, {"edit", "EDIT"}, {"drawsub", "tap = hit on / off"},
+    {"editsub", "tap = choose"}, {"follow", "FOLLOW"}, {"followsub", "page = play head"}, {"copybar", "COPY BAR"},
+    {"paste", "PASTE"}, {"clearbar", "CLEAR BAR"}, {"own", "own values:"}, {"chiphelp", "tap a chip = on the knob"},
+    {"listhelp", "2x tap = list"}, {"kit", "KIT"}, {"savekitsub", "all 8 voices"}, {"loadkitsub", "opens the Kits folder"},
+    {"savesmpsub", "with its functions"}, {"folderup", "FOLDER UP"}, {"list", "LIST"}, {"listq", "Q-Link 13"}, {"gt2", "›"}, {"tapgo", "tap = go there"}};
 static const int kNumCaps = (int)(sizeof(kCaptions) / sizeof(kCaptions[0]));
 
 enum
@@ -114,11 +123,15 @@ enum
     P_QL0 = P_SLK0 + kLocks,              // Q-LINKS: FUNCTIONS: stand-ins for the chosen voice (tap its name)
     P_SKF0 = P_QL0 + kQL,                 // STEPS: what the two knobs set (SAMPLE .. FILTER)
     P_SKN0 = P_SKF0 + kStepKnobs,         // STEPS: the two knobs (0..100, stand-ins)
+    P_PREVIEW = P_SKN0 + kStepKnobs,      // 0.15: PREVIEW: a sample chosen (< >, Q-Link, list, STEPS) plays once
+    P_DRAW,                               // 0.15: STEPS: DRAW (tap = hit on / off) or EDIT (tap = choose)
+    P_FOLLOW,                             // 0.15: STEPS: the page follows the play head
     // buttons
-    P_NEW = P_SKN0 + kStepKnobs, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
+    P_NEW, P_UNDO, P_BASIC, P_PRINT, P_LEARN, P_BACK, P_DRVBTN, P_PGUP, P_PGDN, P_ROOTHERE, P_SAVESMP, P_SAVEKIT, P_LOADSMP, P_CLEARSTEP,
     P_SMPPREV, P_SMPNEXT, P_CONDPREV, P_CONDNEXT, P_HIT, P_CLEARALL, P_EMPTY, P_LOADKIT,
     P_SKFTAP0,                            // STEPS: knob k's field: < = P_SKFTAP0 + 2k, > = + 2k + 1 (flashes 0..25)
-    P_SCROLL = P_SKFTAP0 + 2 * kStepKnobs,
+    P_COPYBAR = P_SKFTAP0 + 2 * kStepKnobs, P_PASTE, P_CLEARBAR, // 0.15 (flashes 26..28)
+    P_SCROLL,
     P_FUNCTAP0,                            // v * kSlots + k: the function's name, tap = next function
     P_PICK0 = P_FUNCTAP0 + kVoices * kSlots, // folder / sample fields: the voice for ORDNER
     P_PADTAP0 = P_PICK0 + kVoices,
@@ -128,14 +141,22 @@ enum
     P_LANETAP0 = P_STEPTAP0 + kGrid,      // STEPS: a voice's name = the whole lane in the editor
     P_VPREV0 = P_LANETAP0 + kVoices,      // main page: < per voice (the previous sample of its folder)
     P_VNEXT0 = P_VPREV0 + kVoices,        // main page: > per voice
+    P_ROLL0 = P_VNEXT0 + kVoices,         // 0.15: ROLL per voice: RANDOM rolls again (HOLD keeps the new roll)
+    P_SEGTAP0 = P_ROLL0 + kVoices,        // 0.15: FOLDER: the path's parts (tap = go there)
+    P_CHIPTAP0 = P_SEGTAP0 + kSegs,       // 0.15: STEPS: the step's own values as chips (tap = on knob 1)
     // texts
-    P_HDRLINK = P_VNEXT0 + kVoices, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
+    P_HDRLINK = P_CHIPTAP0 + kChips, P_PATH, P_LISTINFO, P_VOICEINFO, P_VFOLDER, P_VSAMPLE, P_VCOUNT, P_STATUS,
     P_PRINTINFO, P_PRINTSTATUS, P_PRINTDIRTXT, P_LEARNINFO, P_MAPINFO, P_ROOTTXT, P_LINKINFO, P_MEMINFO, P_VERSION, P_STEPHDR, P_STEPPOS, P_SMPTXT, P_CONDTXT, P_QLTXT,
+    P_KITTXT, P_PAGETXT,                  // 0.15: the kit's name, the list's page
     P_SKFTXT0,                            // STEPS: the knobs' fields (function names)
     P_SKVTXT0 = P_SKFTXT0 + kStepKnobs,   // STEPS: the knobs' values
     P_SLKTXT0_ = P_SKVTXT0 + kStepKnobs,
     P_SLKTXT0 = P_SLKTXT0_,               // the step knobs' values ("—" = the main page's)
-    P_RINGTXT0 = P_SLKTXT0 + kLocks,      // the RANDOM amount in the ring
+    P_SEGTXT0 = P_SLKTXT0 + kLocks,       // 0.15: FOLDER: the path's parts
+    P_CHIPTXT0 = P_SEGTXT0 + kSegs,       // 0.15: STEPS: the chips
+    P_BARDOT0 = P_CHIPTXT0 + kChips,      // 0.15: STEPS: dots under BAR 1-4 (the bar has hits)
+    P_MORETXT0 = P_BARDOT0 + 4,           // 0.15: main page: "+2" = functions off neutral that no slot shows
+    P_RINGTXT0 = P_MORETXT0 + kVoices,    // the RANDOM amount in the ring
     P_FOLDERTXT0 = P_RINGTXT0 + kVoices,
     P_SAMPLETXT0 = P_FOLDERTXT0 + kVoices,
     P_VNAME0 = P_SAMPLETXT0 + kVoices,    // the voice's name (white), empty while it is the chosen one
@@ -151,7 +172,10 @@ enum
     P_SCELL0 = P_FLASH0 + kFlashes,       // STEPS cells: v * 16 + column (144 frames, see stepTexts)
     P_PLAY0 = P_SCELL0 + kGrid,           // STEPS: the play head, per column
     P_VSEL0 = P_PLAY0 + 16,               // main page: the chosen voice's red frame (2 frames)
-    P_COUNT = P_VSEL0 + kVoices
+    P_LVLBAR0 = P_VSEL0 + kVoices,        // 0.15: main page: LEVEL as a bar (21 frames)
+    P_ROWLIT0 = P_LVLBAR0 + kVoices,      // 0.15: FOLDER rows: 0 plain, 1 the voice's sample, 2 being previewed
+    P_CHIPLIT0 = P_ROWLIT0 + kRows,       // 0.15: STEPS: a chip's box (0 none, 1 red)
+    P_COUNT = P_CHIPLIT0 + kChips
 };
 
 // a sample in memory (16 bit)
@@ -291,9 +315,12 @@ public:
                 addParam(q);
             }
         }
+        addParam(boolParam("preview", "PREVIEW", true));
+        addParam(choiceParam("draw", "DRAW EDIT", {"DRAW", "EDIT"}, 0));
+        addParam(boolParam("follow", "FOLLOW", false));
         for (const char* b : {"NEW", "UNDO", "BASIC", "PRINT", "LEARN", "FOLDER UP", "DRIVES", "PAGE BACK", "PAGE NEXT", "ROOT HERE", "SAVE SAMPLE", "SAVE KIT", "LOAD SAMPLE", "CLEAR STEP",
                               "SAMPLE BACK", "SAMPLE NEXT", "CONDITION BACK", "CONDITION NEXT", "HIT", "CLEAR ALL", "EMPTY", "LOAD KIT",
-                              "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2"})
+                              "FN BACK 1", "FN NEXT 1", "FN BACK 2", "FN NEXT 2", "COPY BAR", "PASTE", "CLEAR BAR"})
             addButton(b);
         addParam(intParam("scroll", "LIST", 0, 1000, 500));
         for (int v = 0; v < kVoices; ++v)
@@ -306,12 +333,19 @@ public:
         for (int v = 0; v < kVoices; ++v) addButton(("LANE TAP " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addButton(("VOICE PREV " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addButton(("VOICE NEXT " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addButton(("ROLL " + std::to_string(v + 1)).c_str());
+        for (int i = 0; i < kSegs; ++i) addButton(("SEG TAP " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kChips; ++i) addButton(("CHIP TAP " + std::to_string(i + 1)).c_str());
         for (const char* t : {"KOPFLINK", "PFAD", "LISTINFO", "STIMMINFO", "STIMMORDNER", "STIMMSAMPLE", "STIMMANZAHL",
                               "STATUS", "PRINTINFO", "PRINTSTATUS", "PRINTORDNER", "LERNINFO", "BELEGUNG", "HAUPTORDNER",
-                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND", "QLTEXT",
+                              "LINKINFO", "SPEICHERINFO", "VERSION", "STEPKOPF", "STEPPOS", "STEPSAMPLE", "STEPCOND", "QLTEXT", "KITTEXT", "SEITE",
                               "STEPFN 1", "STEPFN 2", "STEPFNWERT 1", "STEPFNWERT 2"})
             addText(t);
         for (int i = 0; i < kLocks; ++i) addText(("STEPWERT " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kSegs; ++i) addText(("SEGTEXT " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < kChips; ++i) addText(("CHIPTEXT " + std::to_string(i + 1)).c_str());
+        for (int i = 0; i < 4; ++i) addText(("BARPUNKTE " + std::to_string(i + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addText(("MEHR " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("RINGTEXT " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("ORDNERTEXT " + std::to_string(v + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("SAMPLETEXT " + std::to_string(v + 1)).c_str());
@@ -328,22 +362,29 @@ public:
         for (int i = 0; i < kGrid; ++i) addText(("SCHRITT " + std::to_string(i / 16 + 1) + " " + std::to_string(i % 16 + 1)).c_str());
         for (int j = 0; j < 16; ++j) addText(("KOPFSPALTE " + std::to_string(j + 1)).c_str());
         for (int v = 0; v < kVoices; ++v) addText(("STIMMRAHMEN " + std::to_string(v + 1)).c_str());
+        for (int v = 0; v < kVoices; ++v) addText(("LEVELBALKEN " + std::to_string(v + 1)).c_str());
+        for (int r = 0; r < kRows; ++r) addText(("ZEILENLICHT " + std::to_string(r + 1)).c_str());
+        for (int i = 0; i < kChips; ++i) addText(("CHIPLICHT " + std::to_string(i + 1)).c_str());
         if (numParams() != P_COUNT) std::abort();
 
         screen_.init();
         for (int i = P_HDRLINK; i < P_CELL0; ++i) screen_.text(i);
         for (int i = 0; i < kNumCaps; ++i) screen_.text(P_CAP0 + i, kCaptions[i][1]);
-        for (int i = 0; i < kVoices * 16; ++i) screen_.strip(P_CELL0 + i, 3);
+        for (int i = 0; i < kVoices * 16; ++i) screen_.strip(P_CELL0 + i, 6); // 0.15: +3 = the step that plays
         for (int v = 0; v < kVoices; ++v) { screen_.strip(P_LAMP0 + v, 2); screen_.strip(P_PADLIT0 + v, 2); }
         for (int i = 0; i < kFlashes; ++i) screen_.button(P_NEW + i, P_FLASH0 + i);
         for (int i = P_FUNCTAP0; i < P_VNEXT0 + kVoices; ++i) if (i < P_PADTAP0 || i >= P_ROWTAP0) screen_.button(i);
         for (int i = 0; i < kGrid; ++i) screen_.strip(P_SCELL0 + i, 144);
         for (int j = 0; j < 16; ++j) screen_.strip(P_PLAY0 + j, 2);
         for (int v = 0; v < kVoices; ++v) screen_.strip(P_VSEL0 + v, 2);
+        for (int v = 0; v < kVoices; ++v) screen_.strip(P_LVLBAR0 + v, kLvlFrames);
+        for (int r = 0; r < kRows; ++r) screen_.strip(P_ROWLIT0 + r, 3);
+        for (int i = 0; i < kChips; ++i) screen_.strip(P_CHIPLIT0 + i, 2);
+        for (int i = P_ROLL0; i < P_CHIPTAP0 + kChips; ++i) screen_.button(i);
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.14 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.15 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -767,11 +808,8 @@ public:
         if (index >= P_LEVEL0 && index < P_LEVEL0 + kVoices) { std::snprintf(b, sizeof b, "%+.1f dB", plain); out = b; return true; }
         if (index >= P_FUNC0 && index < P_FUNC0 + kVoices * kSlots)
         {
-            // "• TUNE >": the dot = this voice has a function off its neutral value (shown or not)
-            int v = (index - P_FUNC0) / kSlots, f = clamp((int)std::lround(plain), 0, NUM_FUNCS - 1);
-            bool any = false;
-            for (int g = 0; g < NUM_FUNCS; ++g) any = any || std::fabs(get(P_FV0 + v * NUM_FUNCS + g) - defaultValue(g)) > 0.5f;
-            out = std::string(any ? "• " : "") + kFuncNames[f] + " >";
+            // 0.15: the function's name; "+n" beside it counts the others off neutral (MEHR)
+            out = kFuncNames[clamp((int)std::lround(plain), 0, NUM_FUNCS - 1)];
             return true;
         }
         if (index >= P_VAL0 && index < P_VAL0 + kVoices * kSlots)
@@ -1134,12 +1172,15 @@ private:
         if (path == previewPath_) loadMarked();
         else
         {
-            Wave w;
-            if (!loadWav(path, w, 4.f)) { screen_.message(P_LISTINFO, "cannot read"); return; }
-            Sample* s = new Sample(toSample(w, baseName(path)));
-            for (auto& r : previewRetired_) delete r.exchange(nullptr);
-            delete previewPending_.exchange(s, std::memory_order_acq_rel);
             previewPath_ = path;
+            if (getBool(P_PREVIEW)) // 0.15: PREVIEW off = the first tap only marks the WAV
+            {
+                Wave w;
+                if (!loadWav(path, w, 4.f)) { screen_.message(P_LISTINFO, "cannot read"); previewPath_.clear(); return; }
+                Sample* s = new Sample(toSample(w, baseName(path)));
+                for (auto& r : previewRetired_) delete r.exchange(nullptr);
+                delete previewPending_.exchange(s, std::memory_order_acq_rel);
+            }
             screen_.message(P_LISTINFO, "LOAD SAMPLE (or tap again)");
         }
     }
@@ -1310,6 +1351,7 @@ private:
         {
             if (browser_.cwd() == dir) browser_.list(dir + "/" + f);
             screen_.message(P_LISTINFO, (own ? "saved in Kits: " : "saved (no ROOT): ") + f.substr(0, f.size() - 4), 4000);
+            kitName_ = f.substr(0, f.size() - 4) + "  ·  saved";
         }
         else screen_.message(P_LISTINFO, "Error while writing");
     }
@@ -1370,6 +1412,7 @@ private:
         std::string name = baseName(path);
         name = name.substr(0, name.size() - 4);
         loadName_ = missing ? name + ": " + std::to_string(missing) + " folders missing" : name + " loaded";
+        kitName_ = name + (missing ? "  ·  " + std::to_string(missing) + " folders missing" : std::string("  ·  loaded"));
         screen_.message(P_LISTINFO, "KIT: loading " + name + " ...", 4000);
     }
 
@@ -1389,8 +1432,93 @@ private:
         char t[16];
         std::snprintf(t, sizeof t, " %d/%d", b + 1, n);
         screen_.message(P_HDRLINK, std::string(kVoiceNames[v]) + ": " + k->samples[(size_t)b].name.substr(0, 14) + t, 2500);
-        audition_.store(v * 1024 + b + 1);
+        audition(v, b);
     }
+
+    // HIT ON / OFF (and DRAW): the step goes to GENRA CHOP's drum pattern (MIDI channel 10, PRINT, SCHLAG)
+    bool canEdit()
+    {
+        if (getInt(P_AUTO) == 1) { screen_.message(P_STATUS, "TRACK: edit in the MPC grid", 3500); return false; }
+        if (!link_.data() || !linkAlive_) { screen_.message(P_STATUS, "needs GENRA CHOP (LINK)", 3000); return false; }
+        return true;
+    }
+    void toggleHit(int v, int st)
+    {
+        if (!canEdit()) return;
+        const bool on = loop_.drum[v][st].vel == 0;
+        editsOut_.push_back(v | st << 4 | (on ? 1 : 0) << 12);
+        screen_.message(P_STATUS, on ? "HIT ON" : "HIT OFF", 1500);
+    }
+    // 0.15: COPY BAR / PASTE / CLEAR BAR: the shown bar's hits and every step's own values
+    void copyBar()
+    {
+        const int b = clamp(getInt(P_BAR), 0, 3);
+        for (int v = 0; v < kVoices; ++v)
+            for (int j = 0; j < 16; ++j)
+            {
+                const int st = b * 16 + j;
+                clip_.hit[v][j] = loop_.drum[v][st].vel;
+                for (int i = 0; i < kLocks; ++i) clip_.lk[v][j][i] = lock_[v][st][i].load();
+                clip_.smp[v][j] = smpLock_[v][st].load();
+                clip_.cond[v][j] = condLock_[v][st].load();
+            }
+        clip_.has = true;
+        screen_.message(P_STATUS, "COPY BAR " + std::to_string(b + 1) + ": now PASTE in another bar", 3000);
+    }
+    void pasteBar()
+    {
+        if (!clip_.has) { screen_.message(P_STATUS, "COPY BAR first", 2500); return; }
+        const int b = clamp(getInt(P_BAR), 0, 3);
+        const bool hits = getInt(P_AUTO) == 0 && link_.data() && linkAlive_;
+        for (int v = 0; v < kVoices; ++v)
+            for (int j = 0; j < 16; ++j)
+            {
+                const int st = b * 16 + j;
+                for (int i = 0; i < kLocks; ++i) lock_[v][st][i].store(clip_.lk[v][j][i]);
+                smpLock_[v][st].store(clip_.smp[v][j]);
+                condLock_[v][st].store(clip_.cond[v][j]);
+                const bool want = clip_.hit[v][j] > 0, has = loop_.drum[v][st].vel > 0;
+                if (hits && want != has) editsOut_.push_back(v | st << 4 | (want ? 1 : 0) << 12);
+            }
+        syncLocks(true);
+        screen_.message(P_STATUS, std::string("PASTE in BAR ") + std::to_string(b + 1) + (hits ? "" : " (values only)"), 3000);
+    }
+    void clearBar()
+    {
+        const int b = clamp(getInt(P_BAR), 0, 3);
+        const bool hits = getInt(P_AUTO) == 0 && link_.data() && linkAlive_;
+        for (int v = 0; v < kVoices; ++v)
+            for (int j = 0; j < 16; ++j)
+            {
+                const int st = b * 16 + j;
+                for (int i = 0; i < kLocks; ++i) lock_[v][st][i].store(std::numeric_limits<float>::quiet_NaN());
+                smpLock_[v][st].store(-1);
+                condLock_[v][st].store(0);
+                if (hits && loop_.drum[v][st].vel > 0) editsOut_.push_back(v | st << 4);
+            }
+        syncLocks(true);
+        screen_.message(P_STATUS, std::string("CLEAR BAR ") + std::to_string(b + 1) + (hits ? ": UNDO in GENRA CHOP" : " (values)"), 3000);
+    }
+    // 0.15: FOLDER: the last three parts of the open folder's path (tap = go there)
+    std::string segPath(int i) const
+    {
+        const std::string& c = browser_.cwd();
+        if (c.empty() || c == "*") return std::string();
+        std::vector<size_t> ends;
+        for (size_t k = 1; k <= c.size(); ++k) if (k == c.size() || c[k] == '/') ends.push_back(k);
+        const int n = (int)ends.size(), first = std::max(0, n - kSegs), at = first + i;
+        if (at >= n) return std::string();
+        return c.substr(0, ends[(size_t)at]);
+    }
+    std::string segText(int i) const
+    {
+        const std::string d = segPath(i);
+        if (d.empty()) return i == 0 && browser_.cwd().empty() ? std::string("Drives") : std::string();
+        return baseName(d);
+    }
+
+    // 0.15: a sample plays once when chosen, if PREVIEW is on
+    void audition(int v, int sample) { if (getBool(P_PREVIEW)) audition_.store(v * 1024 + sample + 1); }
 
     // LOAD KIT: the list shows the Kits folder
     void openKits()
@@ -1420,7 +1548,7 @@ private:
         screen_.setText(P_HDRLINK, b);
         {
             const int qv = clamp(getInt(P_VOICE), 0, kVoices - 1);
-            screen_.setText(P_QLTXT, std::string("Q-LINKS: ") + kVoiceNames[qv]);
+            screen_.setText(P_QLTXT, std::string("Q: ") + kVoiceNames[qv]);
             for (int v = 0; v < kVoices; ++v)
             {
                 screen_.setText(P_VNAME0 + v, v == qv ? std::string() : std::string(kVoiceNames[v]));
@@ -1434,10 +1562,27 @@ private:
             screen_.setText(P_SAMPLETXT0 + v, kitInfo_[v].file);
         }
         int sv = clamp(getInt(P_VOICE), 0, kVoices - 1);
-        screen_.setText(P_VOICEINFO, std::string("Voice: ") + kVoiceNames[sv]);
+        screen_.setText(P_VOICEINFO, kVoiceNames[sv]);
         screen_.setText(P_VFOLDER, "Folder: " + folderLabel(kitInfo_[sv].folder));
-        screen_.setText(P_VSAMPLE, "Sample: " + kitInfo_[sv].file);
-        screen_.setText(P_VCOUNT, std::to_string(kitInfo_[sv].count) + " samples to roll");
+        screen_.setText(P_VSAMPLE, kitInfo_[sv].file);
+        screen_.setText(P_VCOUNT, std::to_string(kitInfo_[sv].count) + " samples for RANDOM (max 128)");
+        screen_.setText(P_KITTXT, kitName_.empty() ? std::string("—") : kitName_);
+        screen_.setText(P_PAGETXT, browser_.pageText());
+        for (int i = 0; i < kSegs; ++i) screen_.setText(P_SEGTXT0 + i, segText(i));
+        for (int v = 0; v < kVoices; ++v)
+        {
+            // 0.15: LEVEL as a bar; "+n": functions off neutral that neither slot shows
+            const float lv = get(P_LEVEL0 + v);
+            screen_.setFrame(P_LVLBAR0 + v, clamp((int)std::lround((lv + 40.f) / 46.f * (kLvlFrames - 1)), 0, kLvlFrames - 1));
+            int more = 0;
+            for (int g = 0; g < NUM_FUNCS; ++g)
+            {
+                bool shown = false;
+                for (int k = 0; k < kSlots; ++k) shown = shown || getInt(P_FUNC0 + v * kSlots + k) == g;
+                if (!shown && std::fabs(get(P_FV0 + v * NUM_FUNCS + g) - defaultValue(g)) > 0.5f) ++more;
+            }
+            screen_.setText(P_MORETXT0 + v, more ? "+" + std::to_string(more) : std::string());
+        }
         screen_.setText(P_PATH, browser_.pathText(), true);
         screen_.setText(P_LISTINFO, browser_.info());
         std::string loaded;
@@ -1445,7 +1590,11 @@ private:
             std::lock_guard<std::mutex> g(mtx_);
             loaded = voiceFolder_[sv].empty() ? std::string() : voiceFolder_[sv] + "/" + voiceFile_[sv];
         }
-        for (int r = 0; r < kRows; ++r) screen_.setText(P_ROWT0 + r, browser_.rowText(r, loaded, previewPath_));
+        for (int r = 0; r < kRows; ++r)
+        {
+            screen_.setText(P_ROWT0 + r, browser_.rowText(r, loaded, previewPath_));
+            screen_.setFrame(P_ROWLIT0 + r, browser_.isSelected(r, previewPath_) ? 2 : browser_.isSelected(r, loaded) ? 1 : 0);
+        }
         std::snprintf(b, sizeof b, "Drums · 4 bars · %.0f BPM · %s", bpm100 / 100.0, key.c_str());
         screen_.setText(P_PRINTINFO, b);
         screen_.setText(P_PRINTSTATUS, getInt(P_AUTO) == 0 ? "GENRA: GENRA's loop plays" : "TRACK: only the track's notes");
@@ -1600,7 +1749,7 @@ private:
             if (i != smpLock_[v][st].load())
             {
                 smpLock_[v][st].store((int16_t)i);
-                audition_.store(v * 1024 + (i >= 0 ? i : k->base.load()) + 1);
+                audition(v, i >= 0 ? i : k->base.load());
             }
             return;
         }
@@ -1679,7 +1828,7 @@ private:
         if (stepSel_ >= 0)
         {
             int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
-            screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · bar " + bars[st / 16] + " · step " + std::to_string(st % 16 + 1));
+            screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · BAR " + bars[st / 16] + " · STEP " + std::to_string(st % 16 + 1));
             for (int i = 0; i < kLocks; ++i)
             {
                 float x = lock_[v][st][i].load();
@@ -1693,7 +1842,7 @@ private:
         else if (laneSel_ >= 0)
         {
             int v = laneSel_;
-            screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · whole lane");
+            screen_.setText(P_STEPHDR, std::string(kVoiceNames[v]) + " · WHOLE LANE");
             for (int i = 0; i < kLocks; ++i) screen_.setText(P_SLKTXT0 + i, i == LK_CHANCE ? std::string("—") : lockText(i, laneValue(v, i)));
             Kit* k = kit_[v].load();
             screen_.setText(P_SMPTXT, k && !k->samples.empty() ? k->samples[(size_t)clamp(k->base.load(), 0, (int)k->samples.size() - 1)].name : std::string("—"));
@@ -1701,13 +1850,13 @@ private:
         }
         else
         {
-            screen_.setText(P_STEPHDR, "tap a step");
+            screen_.setText(P_STEPHDR, getInt(P_DRAW) == 0 ? "DRAW: tap = hit on / off" : "EDIT: tap a step");
             for (int i = 0; i < kLocks; ++i) screen_.setText(P_SLKTXT0 + i, "—");
             screen_.setText(P_SMPTXT, "—");
             screen_.setText(P_CONDTXT, "—");
         }
         int step = curStep_.load();
-        screen_.setText(P_STEPPOS, step >= 0 ? std::string("playing: bar ") + bars[(step / 16) & 3] + " · step " + std::to_string(step % 16 + 1) : std::string("Stop"));
+        screen_.setText(P_STEPPOS, step >= 0 ? std::string(bars[(step / 16) & 3]) + " · " + std::to_string(step % 16 + 1) : std::string("STOP"));
         for (int v = 0; v < kVoices; ++v)
         {
             char b[16];
@@ -1735,6 +1884,33 @@ private:
             }
         }
         for (int j = 0; j < 16; ++j) screen_.setFrame(P_PLAY0 + j, step >= 0 && step / 16 == bar && step % 16 == j);
+        // 0.15: the chips: the step's own values (tap = that function on knob 1); dots: bars with hits
+        int nc = 0;
+        if (stepSel_ >= 0)
+        {
+            const int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
+            for (int f = 0; f < NUM_SF && nc < kChips; ++f)
+            {
+                bool own = f == SF_SAMPLE ? smpLock_[v][st].load() >= 0
+                         : f == SF_COND ? condLock_[v][st].load() > 0
+                         : !std::isnan(lock_[v][st][lockOfFn(f)].load());
+                if (own) chipFn_[nc++] = f;
+            }
+        }
+        for (int i = 0; i < kChips; ++i)
+        {
+            if (i >= nc) chipFn_[i] = -1;
+            screen_.setText(P_CHIPTXT0 + i, i < nc ? std::string(kStepFnNames[chipFn_[i]]) : std::string());
+            screen_.setFrame(P_CHIPLIT0 + i, i < nc ? 1 : 0);
+        }
+        for (int b = 0; b < 4; ++b)
+        {
+            bool any = false;
+            for (int v = 0; v < kVoices && !any; ++v)
+                for (int j = 0; j < 16 && !any; ++j)
+                    any = (autoMode && l.drum[v][b * 16 + j].vel) || (seenMask_[v].load() >> (b * 16 + j) & 1u);
+            screen_.setText(P_BARDOT0 + b, any ? "• • •" : "");
+        }
     }
 
     void cells()
@@ -1761,7 +1937,7 @@ private:
                     uint32_t roll;
                     rnd = picks(v, s, lastRound_[v].load(), mask, roll);
                 }
-                screen_.setFrame(P_CELL0 + v * 16 + j, hit ? (rnd ? 2 : 1) : 0);
+                screen_.setFrame(P_CELL0 + v * 16 + j, (hit ? (rnd ? 2 : 1) : 0) + (step >= 0 && step % 16 == j ? 3 : 0));
             }
             screen_.setFrame(P_LAMP0 + v, (lit >> v) & 1u);
             screen_.setFrame(P_PADLIT0 + v, (lit >> v) & 1u);
@@ -1923,8 +2099,10 @@ private:
                 const int p = t.first;
                 if (p == P_NEW && L) { L->lane[genralink::LANE_DRUMS].newRequest.fetch_add(1); screen_.message(P_STATUS, on ? "NEW: new drums from the next bar" : "no GENRA CHOP"); }
                 else if (p == P_UNDO && L) { L->lane[genralink::LANE_DRUMS].undoRequest.fetch_add(1); screen_.message(P_STATUS, on ? "UNDO: the last drums" : "no GENRA CHOP"); }
+                else if (p == P_BASIC && nowMs() - armBasic_ > 3000) { armBasic_ = nowMs(); screen_.message(P_STATUS, "BASIC: tap again to reset all", 3000); }
                 else if (p == P_BASIC)
                 {
+                    armBasic_ = 0;
                     for (int v = 0; v < kVoices; ++v) { set(P_RANDOM0 + v, 0.f); notifyHostParameterChanged(P_RANDOM0 + v); lastRandom[v] = 0.f; swapped_[v].store(0); }
                     for (int v = 0; v < kVoices; ++v)
                         for (int f = 0; f < NUM_FUNCS; ++f) setParam(P_FV0 + v * NUM_FUNCS + f, defaultValue(f));
@@ -1954,6 +2132,7 @@ private:
                     stepSel_ = v * kSteps + clamp(getInt(P_BAR), 0, 3) * 16 + i % 16;
                     laneSel_ = -1;
                     syncLocks(true);
+                    if (getInt(P_DRAW) == 0) toggleHit(v, stepSel_ % kSteps); // 0.15: DRAW: the tap sets / clears the hit
                 }
                 else if (p >= P_LANETAP0 && p < P_LANETAP0 + kVoices)
                 {
@@ -1973,7 +2152,7 @@ private:
                         if (next >= n) next = -1;
                         if (next < -1) next = n - 1;
                         smpLock_[v][st].store((int16_t)next);
-                        audition_.store(v * 1024 + (next >= 0 ? next : k->base.load()) + 1);
+                        audition(v, next >= 0 ? next : k->base.load());
                     }
                 }
                 else if (p == P_SMPPREV || p == P_SMPNEXT)
@@ -1992,23 +2171,13 @@ private:
                 }
                 else if (p == P_HIT)
                 {
-                    // HIT ON / OFF: the step goes to GENRA CHOP's drum pattern (MIDI channel 10, PRINT, SCHLAG)
-                    genralink::LinkData* Ld = link_.data();
                     if (stepSel_ < 0) screen_.message(P_STATUS, "tap a step first", 2500);
-                    else if (getInt(P_AUTO) == 1) screen_.message(P_STATUS, "TRACK: edit in the MPC grid", 3500);
-                    else if (!Ld || !linkAlive_) screen_.message(P_STATUS, "HIT: needs GENRA CHOP (LINK)", 3000);
-                    else
-                    {
-                        int v = stepSel_ / kSteps, st = stepSel_ % kSteps;
-                        bool on = loop_.drum[v][st].vel == 0;
-                        uint32_t w = Ld->editW.load();
-                        Ld->editCmd[w % genralink::LinkData::kEdits].store(v | st << 4 | (on ? 1 : 0) << 12);
-                        Ld->editW.store(w + 1, std::memory_order_release);
-                        screen_.message(P_STATUS, on ? "HIT ON: sent to GENRA CHOP" : "HIT OFF: sent to GENRA CHOP", 2500);
-                    }
+                    else toggleHit(stepSel_ / kSteps, stepSel_ % kSteps);
                 }
+                else if (p == P_CLEARALL && nowMs() - armClearAll_ > 3000) { armClearAll_ = nowMs(); screen_.message(P_STATUS, "CLEAR ALL: tap again", 3000); }
                 else if (p == P_CLEARALL)
                 {
+                    armClearAll_ = 0;
                     // CLEAR ALL: every step's own values, and (with GENRA CHOP) every drum hit; UNDO there brings them back
                     for (auto& a : lock_) for (auto& b : a) for (auto& c : b) c.store(std::numeric_limits<float>::quiet_NaN());
                     for (auto& a : smpLock_) for (auto& b : a) b.store(-1);
@@ -2024,13 +2193,35 @@ private:
                     }
                     else screen_.message(P_STATUS, "CLEAR ALL: values (no CHOP)", 4000);
                 }
+                else if (p == P_EMPTY && nowMs() - armEmpty_ > 3000) { armEmpty_ = nowMs(); screen_.message(P_LISTINFO, "EMPTY: tap again (the voice goes silent)", 3000); }
                 else if (p == P_EMPTY)
                 {
+                    armEmpty_ = 0;
                     int v = clamp(getInt(P_VOICE), 0, kVoices - 1);
                     emptyVoice(v);
                     screen_.message(P_LISTINFO, std::string(kVoiceNames[v]) + ": EMPTY (silent)", 3000);
                 }
                 else if (p == P_LOADKIT) openKits();
+                else if (p == P_COPYBAR) copyBar();
+                else if (p == P_PASTE) pasteBar();
+                else if (p == P_CLEARBAR) clearBar();
+                else if (p >= P_ROLL0 && p < P_ROLL0 + kVoices)
+                {
+                    const int v = p - P_ROLL0; // 0.15: ROLL: a new roll, as if RANDOM were turned
+                    seed_[v].fetch_add(1);
+                    swapped_[v].store(0);
+                    screen_.message(P_STATUS, std::string(kVoiceNames[v]) + ": ROLL", 1500);
+                }
+                else if (p >= P_SEGTAP0 && p < P_SEGTAP0 + kSegs)
+                {
+                    const std::string d = segPath(p - P_SEGTAP0);
+                    if (!d.empty()) { browser_.open(d); previewPath_.clear(); }
+                }
+                else if (p >= P_CHIPTAP0 && p < P_CHIPTAP0 + kChips)
+                {
+                    const int f = chipFn_[p - P_CHIPTAP0];
+                    if (f >= 0) setParam(P_SKF0, (float)f);
+                }
                 else if (p == P_AUTO)
                     screen_.message(P_STATUS, getInt(P_AUTO) == 0 ? "GENRA: GENRA's loop plays" : "TRACK: only the track's notes", 3500);
                 else if (p == P_LEARN) pads_.startLearning();
@@ -2095,6 +2286,20 @@ private:
                 if (!f.empty() && isDir(f)) { browser_.open(f); previewPath_.clear(); }
             }
             if (stepSync_.exchange(false)) { stepSel_ = -1; syncLocks(true); }
+            {
+                // 0.15: FOLLOW: the page shows the bar that plays
+                const int st = curStep_.load();
+                if (getBool(P_FOLLOW) && st >= 0 && st / 16 != getInt(P_BAR)) setParam(P_BAR, (float)((st / 16) & 3));
+                // drum edits (PASTE, CLEAR BAR) go to GENRA CHOP a few at a time: LINK's ring holds 16
+                genralink::LinkData* Le = link_.data();
+                for (int n = 0; n < 4 && !editsOut_.empty() && Le; ++n)
+                {
+                    uint32_t w = Le->editW.load();
+                    Le->editCmd[w % genralink::LinkData::kEdits].store(editsOut_.front());
+                    Le->editW.store(w + 1, std::memory_order_release);
+                    editsOut_.erase(editsOut_.begin());
+                }
+            }
             syncLocks(false);
             syncStepKnobs();
             syncLocks(false);
@@ -2174,7 +2379,13 @@ private:
     float skShown_[kStepKnobs] = {};
     bool qlInit_ = false;
     int loadTotal_ = 0, loadMissing_ = 0;  // worker: the voices of this kit / project load, the folders missing
-    std::string loadName_;                 // worker: what to say when the kit is in
+    std::string loadName_;
+    std::string kitName_;                  // 0.15: worker: the kit loaded or saved last (KIT line)
+    long long armBasic_ = 0, armClearAll_ = 0, armEmpty_ = 0; // 0.15: keys that need a second tap within 3 s
+    struct BarClip { bool has = false; uint8_t hit[kVoices][16]; float lk[kVoices][16][kLocks]; int16_t smp[kVoices][16]; int8_t cond[kVoices][16]; };
+    BarClip clip_;                         // 0.15: COPY BAR / PASTE
+    std::vector<int32_t> editsOut_;
+    int chipFn_[kChips] = {-1, -1, -1, -1};  // 0.15: the step function each chip stands for        // 0.15: drum edits waiting for room in LINK's small ring                 // worker: what to say when the kit is in
 };
 
 MPC_PLUGIN_ENTRY(Schlag)

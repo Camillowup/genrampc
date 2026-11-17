@@ -2,6 +2,12 @@
 
 What to check on the MPC after each build (newest first). The user manual is in [README.md](README.md).
 
+- GENRA CHOP 0.18 / GENRA SCHLAG 0.15: the new pages. Do the lists open on a double tap (LENGTH, PAT, MODE, STYLE;
+  SCHLAG: RANDOM kind, function slots, STEPS fields)? M per row on GENRA CHOP (sound, MIDI OUT, SCHLAG's drums), the
+  row lamps, the bar lamps, BANK dots, CLEAR / CLEAR ALL / BASIC / EMPTY with two taps. SCHLAG: ROLL, "+n", LEVEL bar,
+  the play head in the small steps, PREVIEW (off: < > and the list stay silent), STEPS: DRAW / EDIT, FOLLOW, chips,
+  COPY BAR / PASTE / CLEAR BAR; FOLDER: the path parts, red / framed rows, page, KIT line.
+
 - GENRA CHOP 0.17: notes on MIDI channels 2, 3, 4 and 10 coming into GENRA CHOP's track (its own MIDI OUT looping
   back) no longer play or record chops: no more 16th chop spam after your own take in PADS. Not 'REC armed' after Stop.
 

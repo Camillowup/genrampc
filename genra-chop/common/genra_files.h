@@ -551,6 +551,14 @@ public:
         return i < entries_.size() && !path.empty() && entries_[i].path == path;
     }
     std::string pathText() const { return cwd_.empty() ? std::string("Drives") : pathLabel(cwd_); }
+    // "2 / 6": the page of the list
+    std::string pageText() const
+    {
+        const int n = (int)entries_.size();
+        if (n <= rows) return n ? std::string("1 / 1") : std::string();
+        const int pages = (n + rows - 1) / rows, page = std::min(pages, top_ / rows + 1 + (top_ % rows ? 1 : 0));
+        return std::to_string(page) + " / " + std::to_string(pages);
+    }
     std::string info() const
     {
         int n = (int)entries_.size();

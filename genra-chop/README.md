@@ -10,8 +10,8 @@ GENRA is two plugins that work together:
 
 | Plugin | Version | What it is | Look |
 |---|---|---|---|
-| **GENRA CHOP** | 0.17 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** | 0.14 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
+| **GENRA CHOP** | 0.18 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA SCHLAG** | 0.15 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (keygroups, plugins, drum programs, external
 synths): GENRA CHOP sends every part as MIDI on its own channel. Both plugins run on the MPC's transport – there is
@@ -65,6 +65,9 @@ learned pads live in `<drive>/Genra/` and are kept.
   round, so the groove never breaks. While the MPC is stopped, they change at once.
 - **Knobs:** turn them on the screen, with the Q-Links, or **double tap** a knob (or press Enter) for the MPC's large
   knob editor.
+- **Lists:** a choice field (MODE, PAT, STYLE, LENGTH, the RANDOM kind, a function slot, the STEPS knobs' functions):
+  **double tap** it (or Enter) for the MPC's list of all choices.
+- **Keys that erase** (CLEAR, CLEAR ALL, BASIC, EMPTY) need **a second tap** within 3 seconds.
 - Keys flash when tapped. Long texts end in `~`.
 - **The shared folder `<drive>/Genra/`** (next to `VST2 Plugins`, never touched by updates):
   - `pads.txt` – your learned pad map (LEARN on SETUP). Learn once, both plugins use it. Without it: note 36 = pad 1.
@@ -88,25 +91,20 @@ learned pads live in `<drive>/Genra/` and are kept.
 
 | Area | What it does |
 |---|---|
-| **Header** | sample name · tempo · key · LINK count; **SAMPLE / LOOP / CHOP** switch the display |
+| **Header** | the sample, tempo · key · LINK; **LENGTH** (double tap = list); **Q-LINKS 1 / 2** (which set the Q-Links have; press the CHOP key to switch); **BAR** and four lamps (the bar that plays); **SAMPLE / LOOP / CHOP** switch the display |
 | **Display** | the waveform with the chop marks (SAMPLE), the loop (LOOP) or the chop you played (CHOP) |
-| **16 slots** | the chops of the current bank. Tap = play and select. `R` = reversed, `L` = locked |
-| **16 steps** | the running step of the bar |
-| **CHOPS row** | the chop pattern: **PAT < >**, **GRID**, **NEW** |
-| **DRUMS / BASS / MELODY / PADS rows** | each part: what it plays, **MODE < >**, **DENSITY**, **NEW** |
-| **STYLE < >**, **NEW ALL** | change the style, roll everything new |
-| **MODE** | how to chop: **Transient** (on the hits) or **Equal** (equal pieces) |
-| **CHOPS – / +** | how many chops |
-| **BANK A–D** | which 16 chops sit on the pads |
-| **UNDO** | the loop before the last NEW |
+| **16 slots** | the chops of the current bank: number · chord, length, `R` reversed, `L` locked. Tap = play and select |
+| **Rows CHOPS, DRUMS, BASS, MELODY, PADS** | a lamp while the row plays, what it plays, **M** (mute), the kind (PAT / MODE, double tap = list), GRID / DENSITY, **NEW** |
+| **STYLE** | double tap = all 29 styles as a list, **< >** step through them; decade and tempo below |
+| **NEW ALL**, **UNDO** | roll everything new, the loop before |
+| **MODE / CHOPS / BANK** | Transient or Equal, how many chops, which 16 sit on the pads (dots: how full each bank is) |
 | **AUTO / PADS** | who plays the chops – see 4.5 |
-| **CHOKE** | a new chop cuts the one still sounding |
-| **REV / LOCK** | the selected chop backwards / keeps its pad on NEW |
-| **PITCH · DECAY · FILTER · LEVEL** | the selected chop |
-| **STATUS** | messages |
-| **REC · CLEAR · SAVE WAV** | record chops, empty the pattern, save the selected chop as WAV |
+| **CHOKE / REV / LOCK** | a new chop cuts the one sounding / the selected chop backwards / keeps its pad on NEW |
+| **The chop line** | which chop PITCH · DECAY · FILTER · LEVEL act on (the pad you played last) |
+| **STATUS · REC · CLEAR · SAVE WAV** | messages, record chops, empty the loop (two taps), save the selected chop as WAV |
 
-A pad played on the MPC selects its chop: REV, LOCK and the four knobs act on the pad you played last.
+**M** on a row mutes it at once: its sound, its MIDI OUT channel and – for DRUMS – SCHLAG over LINK. The part stays and
+comes back when you turn M off.
 Chops are cut on the zero crossing right before the attack and fade in and out in a few milliseconds, so they do not
 click.
 
@@ -164,9 +162,9 @@ into the MPC sequence first.
 - **AUTO** – GENRA plays the whole loop: chops, drums, bass, melody, chords.
 - **PADS** – you play the chops on the MPC's pads (live or from the MPC track). GENRA keeps playing drums, bass,
   melody and chords. After PRINT GENRA switches to PADS by itself.
-- **CLEAR** (only while the MPC is stopped) – empties every part. UNDO brings the loop back.
+- **CLEAR** (only while the MPC is stopped, two taps) – empties every part. UNDO brings the loop back.
 - **Your own chops, GENRA's band:**
-  1. Stop the MPC, tap **CLEAR**, switch to **PADS**.
+  1. Stop the MPC, tap **CLEAR** twice, switch to **PADS**.
   2. Press **Record** (or Overdub) on the MPC and play your chops on the pads.
   3. Press **Stop** (or Record off). The status says `REC off: bass, melody, pads to your chops`: GENRA writes
      chords, bass, melody and pads that fit **your** chops at once (and new drums, if the drums were empty).
@@ -180,7 +178,7 @@ into the MPC sequence first.
 
 - All 29 styles as keys, one column per decade (80s, 90s, 2000s, 2010s, 2020s). A tap rolls a new loop in that style
   at the end of the pattern. Turning STYLE (Q-Link 5 on CHOP) does the same once the knob rests.
-- **LENGTH**: **AUTO** follows the length of the MPC sequence (1–4 bars: that many of GENRA's bars; longer: the four
+- **LENGTH** (also in the CHOP page's header): **AUTO** follows the length of the MPC sequence (1–4 bars: that many of GENRA's bars; longer: the four
   bars again). By hand: **1, 2 or 4 bars**, **8** = the four bars twice. Recording and the accompaniment use this
   length too – keep it the same as your sequence.
 
@@ -251,57 +249,67 @@ Play the voices on the MPC's pads (pads 1–8 = KICK … PERC, or the learned ma
 
 ### 5.2 SCHLAG page
 
-Header: **GENRA / TRACK**, **UNDO**, **BASIC** (RANDOM 0, every function neutral), **NEW** (asks GENRA CHOP for new
-drums).
+Header: the **KIT** loaded or saved last and the LINK status · **Q:** which Q-Links are on (RANDOM / LEVEL, the chosen
+voice, or all slots – press the SCHLAG key to switch) · **GENRA / TRACK** · **PREVIEW** · **UNDO** · **NEW** (asks GENRA
+CHOP for new drums) · **BASIC** (two taps: RANDOM 0, every function neutral).
 
 Each of the eight columns:
 
 | Part | What it does |
 |---|---|
-| **Name** | tap = choose the voice (red frame); FOLDER and the Q-Links follow it |
+| **Name** | tap = choose the voice (red frame); FOLDER and the Q-Links follow it. The lamp lights on each hit |
 | **M / S** | mute / solo |
-| **< >** | previous / next sample in the voice's folder (plays once, name in the header) |
-| **16 steps** | the voice's hits in this bar (TOM's display is dying – on purpose) |
+| **< >** | previous / next sample in the voice's folder (with PREVIEW on it plays once; the name shows in the header) |
+| **16 steps** | the voice's hits in the bar that plays; red = RANDOM swaps that hit; a red line = the step that plays (TOM's display is dying – on purpose) |
 | **RANDOM ring** | how many of the voice's hits RANDOM changes, 0–100 (Q-Links 1–8) |
-| **Kind** (field under the ring, tap = next) | what RANDOM does to them: **SAMPLE** another sample of the folder · **POOL** any sample of all eight voices · **PITCH** up to an octave down or up · **GHOST** quiet · **SHORT** cut short · **FLIP** backwards · **TEXTURE** filter and drive |
-| **HOLD / LIVE** | HOLD (grey, default): the roll stays until you turn RANDOM again – keep and record what you found. LIVE (red): rolls again every pass |
-| **Two function slots** | tap the name for the next function: TUNE · DECAY · DRIVE · BITS · REPEAT (1/32 1/48 1/64) · PAN · REVERSE · FILTER; knob and value below |
+| **Kind** (double tap = list) | what RANDOM does to them: **SAMPLE** another sample of the folder · **POOL** any sample of all eight voices · **PITCH** up to an octave down or up · **GHOST** quiet · **SHORT** cut short · **FLIP** backwards · **TEXTURE** filter and drive |
+| **HOLD / LIVE** | HOLD (grey, default): the roll stays until you turn RANDOM or tap ROLL – keep and record what you found. LIVE (red): rolls again every pass |
+| **ROLL** | a new roll now, without turning the ring |
+| **Two function slots** | the function (double tap = list of TUNE · DECAY · DRIVE · BITS · REPEAT · PAN · REVERSE · FILTER), its knob and value. A red **+2** = two more functions of this voice are off neutral, not shown in a slot |
+| **LEVEL** | the bar at the bottom (Q-Links 9–16) |
 
-The slots are windows: **every function keeps its value and keeps working**, shown or not. A slot shows `•` when the
-voice has another function away from neutral. LEVEL is on Q-Links 9–16.
+The slots are windows: **every function keeps its value and keeps working**, shown or not.
 
 **Tip:** give every voice its own folder (e.g. a folder with 20 snares). RANDOM SAMPLE then picks from it.
 
 ### 5.3 STEPS page
 
-GENRA's drum pattern as a step sequencer: 8 voices × 16 steps, **BAR 1–4**, the play head in red.
+GENRA's drum pattern as a step sequencer: 8 voices × 16 steps, the play head in red.
 
-- Bright = loud, grey = soft. A red bar left / right = the hit is early / late; a red dot = the step has its own
-  values; a red line under it = its own RANDOM; a blue square = its own sample.
-- **Tap a step:** the editor below sets **this one hit only**. Two knobs, each with a field; **< >** choose what it
-  sets: **SAMPLE** (its own sample from the folder), **CONDITION** (1st / 2nd of 2, 1st–4th of 4, not 1st – which
-  pass of the loop it plays), **LEVEL**, **CHANCE**, **RANDOM**, TUNE, DECAY, DRIVE, BITS, REPEAT, PAN, REVERSE,
-  FILTER. `—` = the main page's value.
-- **CLEAR STEP** – the step's own values go back.
-- **HIT ON / OFF** – switches the hit in GENRA CHOP's pattern (plays at once, also on MIDI channel 10 and PRINT).
-  UNDO on GENRA CHOP takes it back; NEW DRUMS / NEW ALL roll the drums again.
-- **CLEAR ALL** – every drum hit of GENRA's pattern and every step's values go. Notes recorded in the MPC track stay
-  (erase them on the MPC).
-- Tap a voice's **name**: the editor sets the whole lane.
+- **DRAW | EDIT**: in **DRAW** a tap sets or clears the hit (in GENRA CHOP's pattern: it plays at once, also on MIDI
+  channel 10 and PRINT; UNDO on GENRA CHOP takes it back) and selects the step. In **EDIT** a tap only selects it.
+  On TRACK, edit the notes in the MPC's grid.
+- **BAR 1–4**: the bar shown; dots = the bar has hits. **FOLLOW**: the page follows the play head.
+- The cells: bright = loud, grey = soft; a red bar left / right = early / late; a red dot = own values; a red line =
+  own RANDOM; a blue square = own sample; the selected step has a blue frame.
+- **The editor** (below): `SNARE · BAR 1 · STEP 5`. The red chips = the values this step has of its own; tap a chip:
+  that function goes on knob 1. **Two knobs**, each with a field: **< >** step through, double tap = the list:
+  **SAMPLE**, **CONDITION** (1st / 2nd of 2, 1st–4th of 4, not 1st), **LEVEL**, **CHANCE**, **RANDOM**, TUNE, DECAY,
+  DRIVE, BITS, REPEAT, PAN, REVERSE, FILTER. `—` = the main page's value. Tap a voice's **name**: the editor sets the
+  whole lane.
+- **PREVIEW**, **COPY BAR** / **PASTE** (the shown bar's hits and own values into another bar), **CLEAR STEP**,
+  **CLEAR BAR**, **CLEAR ALL** (two taps: every drum hit of GENRA's pattern and every step's values; notes recorded in
+  the MPC track stay – erase them on the MPC).
 
 Q-Links: 1 and 2 the two knobs, 3 BAR, 5 and 6 the two fields.
 
 ### 5.4 FOLDER page
 
-- Choose the **voice** on top; the list opens its folder. First tap on a WAV = preview, second tap or **LOAD SAMPLE**
-  = the voice's sample (its folder becomes the voice's folder).
-- **< PAGE / PAGE >**, **BACK**, **DRIVES**, **ROOT HERE** (SCHLAG's root folder: the list starts there, and SAVE
-  writes there when nothing else is open).
+- Choose the **voice** on top; the list opens its folder.
+- **The path** (the last three folders): tap a part to go there.
+- **The list**: the voice's sample is **red**; the WAV you tapped once has a **yellow frame** and plays (PREVIEW on) –
+  tap it again or **LOAD SAMPLE** to make it the voice's sample (its folder becomes the voice's folder). The page
+  (`2 / 6`) sits between **< PAGE** and **PAGE >**; **LIST** (knob, Q-Link 13) scrolls.
+- **The voice's box**: its sample, folder, and how many samples RANDOM has (max 128).
+- **FOLDER UP**, **DRIVES**, **ROOT HERE** (SCHLAG's root folder: the list starts there, and SAVE writes there when
+  nothing else is open).
+- **EMPTY** (two taps): the voice gets no sample and stays silent.
+- **KIT**: the kit loaded or saved last. **SAVE KIT** – all eight voices (folder, sample, RANDOM, LEVEL, every
+  function) as `Kit NN.kit` in the folder `Kits` in the root folder. **LOAD KIT** opens that folder; tap a kit to load
+  it (`KIT: loading 3/8`).
 - **SAVE SAMPLE** – the voice's sample with its functions (TUNE, REVERSE, DECAY, BITS, DRIVE, FILTER, PAN) as a new
   16-bit WAV (`<sample> NN.wav`).
-- **EMPTY** – the voice gets no sample and stays silent.
-- **SAVE KIT** / **LOAD KIT** – all eight voices (folder, sample, RANDOM, LEVEL, every function) as `Kit NN.kit` in
-  the folder `Kits` in the root folder. Loading shows `KIT: loading 3/8`.
+- **PREVIEW** off: a first tap only marks the WAV.
 
 A voice holds up to 128 WAVs of its folder or 16 MB, whichever comes first (WAVs up to 2 s).
 
