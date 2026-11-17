@@ -14,13 +14,14 @@ instruments, and **GENRA SCHLAG**, an 8-voice drum random sampler that plays GEN
 | Folder | What |
 |---|---|
 | `chop-test/` | **Archive** (no longer built): the mini test `CHOP TEST` (load a WAV from the SSD, chop it with the GENRA CHOP engine, play the chops on the pads) and `CHOP LINK` (a second plugin on another track that follows CHOP TEST). See [chop-test/README.md](chop-test/README.md). |
-| `genra-chop/` | **GENRA CHOP 0.19** (the chopper and chef: loops in 29 styles on the MPC's transport, your own chops with GENRA's accompaniment, MIDI OUT per part) and **GENRA SCHLAG 0.16** (8-voice drum random sampler with RANDOM kinds and STEPS), linked over LINK v3. **User manual: [genra-chop/README.md](genra-chop/README.md)**. Artifact **genra-mpc**. |
+| `genra-chop/` | **GENRA CHOP 0.19** (the chopper and chef: loops in 29 styles on the MPC's transport, your own chops with GENRA's accompaniment, MIDI OUT per part) and **GENRA SCHLAG 0.16** (8-voice drum random sampler with RANDOM kinds and STEPS), linked over LINK v3. **User manual: [genra-chop/README.md](genra-chop/README.md)**. Download: [latest release](https://github.com/Camillowup/genrampc/releases/latest). |
 | `sdk/` | A copy of Akai's MPC Plugin SDK (MIT). One change: `tools/build.py` links `-lpthread` (our plugins run a worker thread). |
 
 ## Install on the MPC
 
 1. On the MPC: **Preferences → Enhancements (Beta)**: turn on **Enable Enhancements** and **External Plugin Support** (MPC OS 3.10.1 or later).
-2. Here on GitHub: **Actions** → the latest successful run → artifact **genra-mpc**. Unzip it.
+2. Download the zip of the newest release: [**Releases → latest**](https://github.com/Camillowup/genrampc/releases/latest) → `GENRA-MPC-….zip`. Unzip it.
+   (Test builds between releases: **Actions** → the latest successful run → artifact **genra-mpc**.)
 3. Inside is a folder `VST2 Plugins` with the plugin folders (`Genra - VST - GENRA CHOP`, `Genra - VST - GENRA SCHLAG`).
    Copy those plugin folders into the folder `VST2 Plugins` at the root of the MPC's drive (internal SSD recommended;
    create `VST2 Plugins` if it is not there). Do not rename them.

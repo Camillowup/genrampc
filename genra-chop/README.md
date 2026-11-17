@@ -27,7 +27,9 @@ no Play button in the plugins, use **Play / Stop** on the MPC.
 
 1. On the MPC: **Preferences › Enhancements (Beta)**: turn on **Enable Enhancements** and **External Plugin
    Support** (MPC OS 3.10.1 or later).
-2. On GitHub: **Actions** › the latest successful run › artifact **genra-mpc**. Unzip it.
+2. Download the zip of the newest release: [**Releases › latest**](https://github.com/Camillowup/genrampc/releases/latest) › `GENRA-MPC-….zip`. Unzip it.
+   Inside is a folder `VST2 Plugins`. (Test builds between releases: **Actions** › the latest successful run ›
+   artifact **genra-mpc**.)
 3. Copy the two folders `Genra - VST - GENRA CHOP` and `Genra - VST - GENRA SCHLAG` into the folder
    **`VST2 Plugins`** at the root of the MPC's drive (internal SSD recommended; create the folder if needed).
    Do not rename them.
