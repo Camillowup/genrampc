@@ -19,7 +19,7 @@
 // per voice and step. AUTO plays it on the MPC's transport; PADS only the notes of this track (pads 1-8 = voices).
 // NEW / UNDO ask GENRA CHOP for new drums / the last ones.
 //
-// Signal flow per hit: sample (16-bit in memory, up to 24 per folder, 2 s each) -> TUNE (rate) / REVERSE -> DECAY
+// Signal flow per hit: sample (16-bit in memory, up to 128 per folder, 2 s each) -> TUNE (rate) / REVERSE -> DECAY
 // -> BITS -> DRIVE -> FILTER -> PAN -> LEVEL, velocity -> sum -> VOLUME -> a fixed peak limiter -> out 1/2.
 // Hall and delay: the MPC track's sends. Threads: process() (audio) only plays and touches atomics; a worker loads
 // folders, builds the screen and writes files.
@@ -212,7 +212,11 @@ struct Player
     int bits = 16;
     float fa = 1.f, zl = 0.f, zr = 0.f;
     int age = 0, fade = -1;
+    int fadeLen = 1; // the length of the fade-out that runs (fade counts down from it)
 };
+
+// a voice that cuts itself / the closed hat that cuts the open hat: about 5 ms, like GENRA CHOP's choke
+static const int kCutFade = 220;
 
 struct Hit { double at; int voice; float vel; int step; uint32_t round; };
 
@@ -387,7 +391,7 @@ public:
         screen_.watch(P_BAR);
         screen_.watch(P_SCROLL);
         screen_.watch(P_AUTO);
-        screen_.setText(P_VERSION, "GENRA SCHLAG 0.16 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA SCHLAG 0.17 · LINK v3");
 
         for (int v = 0; v < kVoices; ++v)
         {
@@ -548,6 +552,7 @@ public:
         if (playing && autoMode && cur_ >= 0)
         {
             const double q0 = tr.ppqPos * 4.0, q1 = q0 + ctx.numFrames / spStep;
+            if (!wasPlaying_) { passCount_ = 0; lastPos_ = -1; } // a start: the first pass
             if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0)
             {
                 nextStep_ = std::floor(q0 + 1e-6); // a step that began a moment ago (start, end of the count-in) still plays
@@ -566,7 +571,11 @@ public:
                 }
                 uint32_t round = (uint32_t)((n - pos) / len) + wraps_ * 7919u; // the pass of the loop
                 double base = std::max(0.0, (nextStep_ - q0) * spStep + ((s & 1) ? (swing - 0.5f) * 2.f * spStep : 0.0));
-                const uint32_t pass = (uint32_t)((n - pos) / len);
+                // the passes since the start: the position going back is a new pass, whether the loop came round or
+                // the MPC jumped back at the end of its sequence (there the position alone would always say pass 0)
+                if (lastPos_ >= 0 && pos < lastPos_) ++passCount_;
+                lastPos_ = pos;
+                const uint32_t pass = passCount_;
                 for (int v = 0; v < kVoices; ++v)
                 {
                     const genralink::DrumHit& h = loop->drum[v][s];
@@ -665,9 +674,10 @@ public:
                     float env = p.gain;
                     if (p.decayLen > 0.f) env *= std::max(0.f, 1.f - p.age / p.decayLen);
                     if (p.age < 16) env *= p.age / 16.f;
-                    if (p.fade >= 0) { env *= p.fade / 64.f; if (--p.fade <= 0) { p.active = false; continue; } }
+                    if (p.fade >= 0) { env *= (float)p.fade / (float)p.fadeLen; if (--p.fade <= 0) { p.active = false; continue; } }
                     if (p.bits < 16) { float q = (float)(1 << (p.bits - 1)); a = std::round(a * q) / q; b = std::round(b * q) / q; }
-                    if (p.drive > 0.01f) { float d = 1.f + 8.f * p.drive; a = std::tanh(a * d) / std::tanh(d); b = std::tanh(b * d) / std::tanh(d); }
+                    // DRIVE from 0: no step in level where it sets in (9 at 100 % as before)
+                    if (p.drive > 0.01f) { float d = 9.f * p.drive, n = 1.f / std::tanh(d); a = std::tanh(a * d) * n; b = std::tanh(b * d) * n; }
                     if (p.fa < 1.f) { p.zl += p.fa * (a - p.zl); p.zr += p.fa * (b - p.zr); a = p.zl; b = p.zr; }
                     if (audible_[v]) { l += a * env * p.panL; rr += b * env * p.panR; lit |= 1u << v; }
                     p.pos += p.rev ? -p.rate : p.rate;
@@ -842,14 +852,21 @@ private:
         char b[32];
         switch (f)
         {
-            case F_TUNE: std::snprintf(b, sizeof b, "%+d st", (int)std::lround((v - 50.f) * 0.24f)); break;
+            case F_TUNE: std::snprintf(b, sizeof b, "%+.1f st", (double)((v - 50.f) * 0.24f)); break; // as it plays (not rounded)
             case F_DECAY: std::snprintf(b, sizeof b, v >= 99.5f ? "full" : "%.0f %%", v); break;
             case F_DRIVE: std::snprintf(b, sizeof b, "%.0f %%", v); break;
             case F_BITS: std::snprintf(b, sizeof b, "%d", bitsOf(v)); break;
             case F_REPEAT: { const char* r[4] = {"off", "1/32", "1/48", "1/64"}; std::snprintf(b, sizeof b, "%s", r[repeatIndex(v)]); break; }
             case F_PAN: { int p = (int)std::lround((v - 50.f) * 2.f); if (!p) std::snprintf(b, sizeof b, "Center"); else std::snprintf(b, sizeof b, "%s %d", p < 0 ? "L" : "R", std::abs(p)); break; }
             case F_REVERSE: std::snprintf(b, sizeof b, v >= 50.f ? "on" : "off"); break;
-            default: if (v >= 99.5f) std::snprintf(b, sizeof b, "open"); else std::snprintf(b, sizeof b, "LP %.1fk", cutoffHz(v) / 1000.f); break;
+            default:
+            {
+                const float hz = cutoffHz(v);
+                if (v >= 99.5f) std::snprintf(b, sizeof b, "open");
+                else if (hz >= 1000.f) std::snprintf(b, sizeof b, "LP %.1fk", hz / 1000.f);
+                else std::snprintf(b, sizeof b, "LP %.0f", hz); // below 1 kHz in Hz, like GENRA CHOP
+                break;
+            }
         }
         return b;
     }
@@ -986,7 +1003,7 @@ private:
         if (!k || k->samples.empty()) return;
         const Sample& s = k->samples[(size_t)clamp(idx, 0, (int)k->samples.size() - 1)];
         if (!s.frames()) return;
-        for (Player& q : players_[v]) if (q.active && q.fade < 0) q.fade = 64;
+        for (Player& q : players_[v]) if (q.active && q.fade < 0) q.fade = q.fadeLen = kCutFade;
         Player* p = &players_[v][0];
         for (Player& q : players_[v]) if (!q.active) { p = &q; break; }
         *p = Player();
@@ -1027,8 +1044,9 @@ private:
         const Sample& s = kk->samples[(size_t)clamp(si, 0, (int)kk->samples.size() - 1)];
         if (!s.frames()) return;
         // the voice's other player fades out (a drum cuts itself); the closed hat cuts the open hat
-        for (Player& q : players_[v]) if (q.active && q.fade < 0) q.fade = 64;
-        if (v == 4 && getBool(P_CHOKE)) for (Player& q : players_[5]) if (q.active && q.fade < 0) q.fade = 96;
+        // (the fade was divided by 64 whatever its length: a choked open hat jumped up 3.5 dB first)
+        for (Player& q : players_[v]) if (q.active && q.fade < 0) q.fade = q.fadeLen = kCutFade;
+        if (v == 4 && getBool(P_CHOKE)) for (Player& q : players_[5]) if (q.active && q.fade < 0) q.fade = q.fadeLen = kCutFade;
         Player* p = &players_[v][0];
         for (Player& q : players_[v]) if (!q.active) { p = &q; break; }
         if (p->active) p = &players_[v][1];
@@ -1119,6 +1137,18 @@ private:
             if (i != baseIdx && used >= kMaxVoiceBytes) continue;
             Wave w;
             if (!loadWav(folder + "/" + files[(size_t)i], w, kMaxSeconds)) continue;
+            // a sample longer than kMaxSeconds is cut there: 20 ms out, so a long 808 or crash does not click
+            if (w.frames() >= (size_t)(kMaxSeconds * w.rate))
+            {
+                const size_t fn = std::min(w.frames(), (size_t)(0.02f * w.rate));
+                for (size_t j = 0; j < fn; ++j)
+                {
+                    const float g = (float)j / (float)fn;
+                    const size_t at = w.frames() - 1 - j;
+                    w.L[at] *= g;
+                    if (!w.R.empty()) w.R[at] *= g;
+                }
+            }
             if (i == baseIdx) k->base = (int)k->samples.size();
             k->samples.push_back(toSample(w, stripWav(files[(size_t)i])));
             k->files.push_back(files[(size_t)i]);
@@ -1287,8 +1317,8 @@ private:
         float fc = funcValue(v, F_FILTER, 100.f);
         p.fa = fc >= 99.5f ? 1.f : 1.f - std::exp(-2.f * 3.14159265f * cutoffHz(fc) / (float)sr);
         float pan = (funcValue(v, F_PAN, 50.f) - 50.f) / 50.f;
-        p.panL = std::min(1.f, std::sqrt(0.5f * (1.f - pan)) * 1.4142f);
-        p.panR = std::min(1.f, std::sqrt(0.5f * (1.f + pan)) * 1.4142f);
+        p.panL = std::sqrt(0.5f * (1.f - pan)) * 1.4142f; // as it plays (the WAV is clamped when written)
+        p.panR = std::sqrt(0.5f * (1.f + pan)) * 1.4142f;
         std::vector<float> L, Rr;
         float a, b;
         while (sampleAt(p, a, b) && L.size() < (size_t)(sr * 8.0))
@@ -1296,7 +1326,7 @@ private:
             float env = 1.f;
             if (p.decayLen > 0.f) { env = std::max(0.f, 1.f - p.age / p.decayLen); if (env <= 0.f) break; }
             if (p.bits < 16) { float q = (float)(1 << (p.bits - 1)); a = std::round(a * q) / q; b = std::round(b * q) / q; }
-            if (p.drive > 0.01f) { float d = 1.f + 8.f * p.drive; a = std::tanh(a * d) / std::tanh(d); b = std::tanh(b * d) / std::tanh(d); }
+            if (p.drive > 0.01f) { float d = 9.f * p.drive, n = 1.f / std::tanh(d); a = std::tanh(a * d) * n; b = std::tanh(b * d) * n; }
             if (p.fa < 1.f) { p.zl += p.fa * (a - p.zl); p.zr += p.fa * (b - p.zr); a = p.zl; b = p.zr; }
             L.push_back(a * env * p.panL);
             Rr.push_back(b * env * p.panR);
@@ -2233,7 +2263,7 @@ private:
                     if (dir.empty()) screen_.message(P_DIAGINFO, "DIAG: no drive to write to", 3000);
                     else if (!diag_.running())
                     {
-                        diag_.start(dir, "GENRA SCHLAG 0.16 · LINK v3", &diagTr_, 120);
+                        diag_.start(dir, "GENRA SCHLAG 0.17 · LINK v3", &diagTr_, 120);
                         screen_.message(P_DIAGINFO, "DIAG: 2 min, now use the MPC", 4000);
                     }
                 }
@@ -2324,9 +2354,18 @@ private:
                 if (getBool(P_FOLLOW) && st >= 0 && st / 16 != getInt(P_BAR)) setParam(P_BAR, (float)((st / 16) & 3));
                 // drum edits (PASTE, CLEAR BAR) go to GENRA CHOP a few at a time: LINK's ring holds 16
                 genralink::LinkData* Le = link_.data();
+                if (!linkAlive_) { editsOut_.clear(); editWaitMs_ = 0; } // GENRA CHOP is gone: nobody takes them
                 for (int n = 0; n < 4 && !editsOut_.empty() && Le; ++n)
                 {
                     uint32_t w = Le->editW.load();
+                    // the ring is full of edits GENRA CHOP has not read yet (it is busy: loading, cutting): wait for
+                    // room, at most a second (an older GENRA CHOP does not report what it read)
+                    if (w - Le->editR.load(std::memory_order_acquire) >= (uint32_t)genralink::LinkData::kEdits)
+                    {
+                        if (!editWaitMs_) editWaitMs_ = nowMs();
+                        if (nowMs() - editWaitMs_ < 1000) break;
+                    }
+                    else editWaitMs_ = 0;
                     Le->editCmd[w % genralink::LinkData::kEdits].store(editsOut_.front());
                     Le->editW.store(w + 1, std::memory_order_release);
                     editsOut_.erase(editsOut_.begin());
@@ -2391,6 +2430,8 @@ private:
     bool autoNow_ = true;
     uint64_t loopMask_[kVoices] = {}, seenCur_[kVoices] = {}, seenPrev_[kVoices] = {};
     uint32_t midiRound_[kVoices] = {}, wraps_ = 0;
+    uint32_t passCount_ = 0;  // audio thread: the passes of the loop since the start (STEPS: CONDITION, CHANCE)
+    long lastPos_ = -1;       // audio thread: the last step's position in the loop (-1: none yet)
     double lastPpq_ = -1.0;
     // RANDOM (shared): HOLD's roll, the last roll played, HOLD | LIVE as the worker saw it steady, positions for the state
     std::atomic<uint32_t> holdRound_[kVoices], lastRound_[kVoices];
@@ -2419,6 +2460,7 @@ private:
     struct BarClip { bool has = false; uint8_t hit[kVoices][16]; float lk[kVoices][16][kLocks]; int16_t smp[kVoices][16]; int8_t cond[kVoices][16]; };
     BarClip clip_;                         // 0.15: COPY BAR / PASTE
     std::vector<int32_t> editsOut_;
+    long long editWaitMs_ = 0;             // worker: since when the edits wait for room in LINK's ring (0: not waiting)
     int chipFn_[kChips] = {-1, -1, -1, -1};  // 0.15: the step function each chip stands for        // 0.15: drum edits waiting for room in LINK's small ring                 // worker: what to say when the kit is in
 };
 

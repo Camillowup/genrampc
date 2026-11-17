@@ -65,8 +65,20 @@ bool readWav(const std::vector<uint8_t>& buf, SampleData& out, std::string& err,
 		for (int c = 0; c < std::min(ch, 2); c++) {
 			const uint8_t* p = data + (f * ch + c) * bps;
 			float v = 0.f;
-			if (fmt == 3)
-				v = bits == 32 ? *(const float*) (const void*) p : (float) *(const double*) (const void*) p;
+			if (fmt == 3) {
+				// memcpy: the data need not sit on a 4 / 8 byte boundary (extra chunks before it), and reading a float
+				// through a cast pointer there can crash the 32-bit ARM build
+				if (bits == 32) {
+					float x;
+					memcpy(&x, p, 4);
+					v = x;
+				}
+				else {
+					double x;
+					memcpy(&x, p, 8);
+					v = (float) x;
+				}
+			}
 			else if (bits == 8)
 				v = (p[0] - 128) / 128.f;
 			else if (bits == 16)

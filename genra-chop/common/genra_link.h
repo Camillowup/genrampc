@@ -122,6 +122,9 @@ struct LinkData
     // written by GENRA SCHLAG (added at the end): 1 = TRACK (SCHLAG plays only its MPC track's notes), so GENRA CHOP
     // sends no drums on MIDI channel 10 while SCHLAG is alive
     std::atomic<int32_t>  drumsTrack;
+    // written by GENRA CHOP (added at the end): the editW it has read up to, so GENRA SCHLAG does not write over
+    // edits that still wait in the ring
+    std::atomic<uint32_t> editR;
 };
 static const int kEditClearAll = 15;
 

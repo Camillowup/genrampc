@@ -372,6 +372,7 @@ inline bool readWav(const std::vector<uint8_t>& b, Wave& out, float maxSeconds)
             else if (bytes == 2) v = (int16_t)(p[0] | (p[1] << 8)) / 32768.f;
             else if (bytes == 3) v = (int32_t)((p[0] << 8) | (p[1] << 16) | (p[2] << 24)) / 2147483648.f;
             else v = (int32_t)(p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24)) / 2147483648.f;
+            if (!std::isfinite(v)) v = 0.f; // a float WAV with NaN / Inf in it: silence, not full scale
             (c == 0 ? out.L : out.R)[f] = v;
         }
     return frames > 0;

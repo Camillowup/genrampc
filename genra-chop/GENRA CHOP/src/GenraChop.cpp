@@ -324,7 +324,7 @@ public:
         for (int i = 0; i < kRowsM; ++i) screen_.strip(P_ACT0 + i, 2);
         screen_.strip(P_REVLIT, 2);
         screen_.strip(P_LOCKLIT, 2);
-        screen_.setText(P_VERSION, "GENRA CHOP 0.19 · LINK v3");
+        screen_.setText(P_VERSION, "GENRA CHOP 0.20 · LINK v3");
         for (int p = P_NEWALL; p < P_ROWTAP0; ++p)
         {
             if (p == P_SCROLL) continue;
@@ -532,6 +532,7 @@ public:
         {
             const double q0 = tr.ppqPos * 4.0;
             const double q1 = q0 + ctx.numFrames / spStep;
+            if (!wasPlaying_) { passCount_ = 0; lastPos_ = -1; } // a start: the first pass
             if (!wasPlaying_ || nextStep_ < q0 - 1.0 || nextStep_ > q1 + 1.0)
             {
                 // a start (also right after the count-in, where the MPC reports 0.001 .. 0.005): a step that began a
@@ -547,6 +548,11 @@ public:
                 // A new loop (NEW, STYLE) starts at the end of the pattern.
                 long pos = ((n % len) + len) % len;
                 int s = (int)(pos % kSteps);
+                // the passes since the start: the position going back is a new pass, whether the loop came round or
+                // the MPC jumped back at the end of its sequence (there the position alone would always say pass 0,
+                // so "every 2nd time" and the chances fell the same way on every pass)
+                if (lastPos_ >= 0 && pos < lastPos_) ++passCount_;
+                lastPos_ = pos;
                 if (pos == 0 || swapNow_.exchange(false)) swapSeq();
                 curStep_.store(s, std::memory_order_relaxed);
                 if (L) L->step.store(s, std::memory_order_relaxed);
@@ -555,7 +561,7 @@ public:
                 {
                     // 0.15: PADS silences only the chop pattern (the pads play the chops); bass, melody, pads and
                     // drums go on, also on MIDI OUT
-                    const uint32_t pass = (uint32_t)((n - pos) / len);
+                    const uint32_t pass = passCount_;
                     if (autoMode && !getBool(P_MUTE0)) scheduleStep(seq_->ev[s], s, pass, at, spStep, seq_->swing);
                     scheduleMidi(*seq_, s, pass, at, spStep);
                 }
@@ -1144,13 +1150,23 @@ private:
         screen_.message(P_STATUS, std::string("GRID ") + names[clamp(getInt(P_CHOPGRID), 0, 5)] + ": at the pattern end", 2500);
     }
 
+    // UNDO's copy: the pattern and the chops as rolled (GRID starts from those)
+    void keepForUndo()
+    {
+        undoPat_ = pat_;
+        hasUndo_ = true;
+        for (int s = 0; s < hh::LEN; ++s) undoRaw_[s] = chopRaw_[s];
+        undoRawValid_ = rawValid_;
+    }
+
     void regenerate(int track, bool keepUndo = true)
     {
         if (keepUndo)
         {
-            if (track < 0) { undoPat_ = pat_; hasUndo_ = true; }
-            else if (track < kLanes) { laneUndo_[track] = pat_; laneHasUndo_[track] = true; }
-            else { undoPat_ = pat_; hasUndo_ = true; } // NEW CHOPS: UNDO brings the chops back
+            // a lane's NEW counts for the UNDO key too (it used to go back to before the last NEW ALL); a companion's
+            // own UNDO still brings only its lane back
+            if (track >= 0 && track < kLanes) { laneUndo_[track] = pat_; laneHasUndo_[track] = true; }
+            keepForUndo(); // NEW ALL, a lane's NEW, NEW CHOPS
         }
         set_.style = clamp(getInt(P_STYLE), 0, hh::NUM_STYLES - 1);
         set_.drumMode = clamp(getInt(P_LANEMODE0 + 0), 0, hh::NUM_GROOVES - 1);
@@ -1820,11 +1836,13 @@ private:
         genralink::LinkData* L = link_.data();
         if (!L) return;
         uint32_t w = L->editW.load(std::memory_order_acquire);
-        if (!editRSet_) { editR_ = w; editRSet_ = true; return; } // edits from before this plugin started: not ours
+        if (!editRSet_) { editR_ = w; editRSet_ = true; L->editR.store(w, std::memory_order_release); return; } // edits from before this plugin started: not ours
         if (w == editR_) return;
         if (w - editR_ > (uint32_t)genralink::LinkData::kEdits) editR_ = w - genralink::LinkData::kEdits;
-        undoPat_ = pat_;
-        hasUndo_ = true;
+        // PASTE / CLEAR BAR arrive a few edits at a time: UNDO takes the whole run back, not only its last part
+        const long long tEdit = nowMs();
+        if (tEdit - lastEditMs_ > 1000) keepForUndo();
+        lastEditMs_ = tEdit;
         // the first edit takes the drums as they play (DENSITY applied): hits DENSITY hid stay away, and HIT OFF
         // finds every hit SCHLAG shows
         if (!pat_.edited[hh::T_DRUMS])
@@ -1844,9 +1862,11 @@ private:
             }
             if (v >= hh::DRUMS || st >= kSteps) continue;
             hh::Hit& h = pat_.drum[v][st];
-            if (on) { h = hh::Hit(); h.vel = 0.85f; h.prio = 0.f; }
+            // ON where a hit already is (M DRUMS hides the hits from SCHLAG, so it asks for one): the hit stays as it is
+            if (on) { if (h.vel <= 0.f) { h = hh::Hit(); h.vel = 0.85f; h.prio = 0.f; } }
             else h = hh::Hit();
         }
+        L->editR.store(editR_, std::memory_order_release); // read up to here: SCHLAG may write on
         pat_.edited[hh::T_DRUMS] = true;
         publishLoop(true);
         screen_.message(P_STATUS, cleared ? "SCHLAG: CLEAR ALL (UNDO = back)" : "SCHLAG: drum step edited (NEW DRUMS rolls again)", 3000);
@@ -1867,13 +1887,14 @@ private:
                 long pass = (long)std::floor((double)q / len);
                 long pos = ((q % len) + len) % len;
                 int st = (int)(pos % kSteps);
-                if (pass != recPass_) { undoPat_ = pat_; hasUndo_ = true; recPass_ = pass; } // UNDO: this pass
+                if (pass != recPass_) { keepForUndo(); recPass_ = pass; } // UNDO: this pass
                 hh::ChopEv e;
                 e.pad = (int8_t)h.chop;
                 e.vel = std::max(0.2f, h.vel);
                 float secs = h.chop < info_.count ? info_.chop[h.chop].seconds : 0.25f;
                 e.len = clamp(secs * bpm / 60.f * 4.f, 0.5f, 16.f);
                 pat_.chop[st] = e;
+                if (rawValid_) chopRaw_[st] = e; // GRID starts from the chops as rolled: the recorded hit belongs to them
                 recDirty_ = true;
             }
             recR_.store(r, std::memory_order_release);
@@ -1925,7 +1946,15 @@ private:
             else if (p >= P_NEW0 && p < P_NEW0 + kLanes) newLane(p - P_NEW0);
             else if (p == P_UNDO)
             {
-                if (hasUndo_) { std::swap(pat_, undoPat_); publishLoop(); screen_.message(P_STATUS, "UNDO: the last loop"); }
+                if (hasUndo_)
+                {
+                    std::swap(pat_, undoPat_);
+                    // the chops as rolled go back too (else GRID brought the undone roll's chops again)
+                    for (int s = 0; s < hh::LEN; ++s) std::swap(chopRaw_[s], undoRaw_[s]);
+                    std::swap(rawValid_, undoRawValid_);
+                    publishLoop();
+                    screen_.message(P_STATUS, "UNDO: the last loop");
+                }
                 else screen_.message(P_STATUS, "nothing to undo");
             }
             else if (p == P_SAVE) saveChop();
@@ -1960,9 +1989,9 @@ private:
                 else
                 {
                     clearArmed_ = 0;
-                    undoPat_ = pat_;
-                    hasUndo_ = true;
+                    keepForUndo();
                     pat_.clear();
+                    rawValid_ = false; // GRID starts from the empty lane, not from the chops rolled before
                     publishLoop();
                     screen_.message(P_STATUS, "CLEAR: empty. PADS + REC + Play: your chops", 4000);
                 }
@@ -1992,7 +2021,7 @@ private:
                 if (dir.empty()) screen_.message(P_STATUS, "DIAG: no drive to write to", 3000);
                 else if (!diag_.running())
                 {
-                    const std::string head = "GENRA CHOP 0.19 · LINK v3 · MIDI OUT: " + midi_.status();
+                    const std::string head = "GENRA CHOP 0.20 · LINK v3 · MIDI OUT: " + midi_.status();
                     diag_.start(dir, head, &diagTr_, 120);
                     screen_.message(P_STATUS, "DIAG: 2 min, now use the MPC", 4000);
                 }
@@ -2130,6 +2159,11 @@ private:
     bool wasPlaying_ = false;
     hh::ChopEv chopRaw_[hh::LEN];  // worker: the chop lane as rolled, before GRID
     bool rawValid_ = false;
+    hh::ChopEv undoRaw_[hh::LEN];  // worker: chopRaw_ as it was with undoPat_
+    bool undoRawValid_ = false;
+    long long lastEditMs_ = 0;     // worker: when SCHLAG's last drum edits came (one UNDO per run of edits)
+    uint32_t passCount_ = 0;       // audio thread: the passes of the loop since the start
+    long lastPos_ = -1;            // audio thread: the last step's position in the loop (-1: none yet)
     int lastGrid_ = -1;
     uint32_t chopSeed_ = 1;        // the roll the chops came from (GRID's chance of a second chop)
     genramidi::Out midi_;

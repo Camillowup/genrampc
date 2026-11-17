@@ -2,6 +2,14 @@
 
 What to check on the MPC after each build (newest first). The user manual is in [README.md](README.md).
 
+- GENRA CHOP 0.20 / GENRA SCHLAG 0.17 (fixes from a code review; update both plugins together, LINK got a field):
+  a step with CONDITION "2nd of 2" (SCHLAG, STEPS) while the MPC loops a 4-bar sequence: does it play every second
+  pass? CHANCE 50 %: does it change from pass to pass? NEW BASS, then UNDO in GENRA CHOP: only that NEW goes back.
+  SCHLAG: COPY BAR, PASTE in another bar, then UNDO in GENRA CHOP: the whole paste goes back. REC or CLEAR, then turn
+  GRID: no old chops come back. SCHLAG: DRIVE from 0 up has no jump in level; TUNE shows a decimal; FILTER below 1 kHz
+  in Hz; the closed hat cuts the open hat without a bump; kicks that cut themselves (5 ms now): still tight? A sample
+  longer than 2 s ends without a click.
+
 - GENRA CHOP 0.19 / GENRA SCHLAG 0.16: first, does the list now show the values on a double tap (PAT, MODE, STYLE,
   LENGTH; SCHLAG: RANDOM kind, function slots)? A single tap on such a field or on a knob: a red frame, the data wheel
   steps. CHOP rows: < > beside PAT / MODE, M the whole row high, OCT as a key under BASS. SAVE LOOP: a WAV of the

@@ -10,8 +10,8 @@ GENRA is two plugins that work together:
 
 | Plugin | Version | What it is | Look |
 |---|---|---|---|
-| **GENRA CHOP** | 0.19 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
-| **GENRA SCHLAG** | 0.16 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
+| **GENRA CHOP** | 0.20 | The chef: sample browser, chopper, 29 styles, the loop, MIDI OUT of every part | retro cream, green LCD (MPC60 / MPC Live II Retro) |
+| **GENRA SCHLAG** | 0.17 | The drums: an 8-voice drum random sampler, a Polyend Play for the MPC | black, grey display (MPC3000 LE) |
 
 Bass, melody and chords are played by the MPC's own instruments (keygroups, plugins, drum programs, external
 synths): GENRA CHOP sends every part as MIDI on its own channel. Both plugins run on the MPC's transport – there is

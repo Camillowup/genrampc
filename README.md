@@ -14,7 +14,7 @@ instruments, and **GENRA SCHLAG**, an 8-voice drum random sampler that plays GEN
 | Folder | What |
 |---|---|
 | `chop-test/` | **Archive** (no longer built): the mini test `CHOP TEST` (load a WAV from the SSD, chop it with the GENRA CHOP engine, play the chops on the pads) and `CHOP LINK` (a second plugin on another track that follows CHOP TEST). See [chop-test/README.md](chop-test/README.md). |
-| `genra-chop/` | **GENRA CHOP 0.19** (the chopper and chef: loops in 29 styles on the MPC's transport, your own chops with GENRA's accompaniment, MIDI OUT per part) and **GENRA SCHLAG 0.16** (8-voice drum random sampler with RANDOM kinds and STEPS), linked over LINK v3. **User manual: [genra-chop/README.md](genra-chop/README.md)**. Download: [latest release](https://github.com/Camillowup/genrampc/releases/latest). |
+| `genra-chop/` | **GENRA CHOP 0.20** (the chopper and chef: loops in 29 styles on the MPC's transport, your own chops with GENRA's accompaniment, MIDI OUT per part) and **GENRA SCHLAG 0.17** (8-voice drum random sampler with RANDOM kinds and STEPS), linked over LINK v3. **User manual: [genra-chop/README.md](genra-chop/README.md)**. Download: [latest release](https://github.com/Camillowup/genrampc/releases/latest). |
 | `sdk/` | A copy of Akai's MPC Plugin SDK (MIT). One change: `tools/build.py` links `-lpthread` (our plugins run a worker thread). |
 
 ## Install on the MPC
